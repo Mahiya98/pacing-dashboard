@@ -1,0 +1,1080 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Daily Pacing Dashboard â€” MCP DWH</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.0/chart.umd.min.js"></script>
+<style>
+  :root{
+    --ink:#0B1220; --steel:#12324A; --canvas:#EEF2F6; --card:#FFFFFF; --line:#DDE4EC;
+    --brand:#0F6E6A; --amber:#D98E31; --red:#C6423F; --soft:#5B6B7E;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;font-family:'Inter',sans-serif;color:var(--ink);
+    background:
+      radial-gradient(1100px 520px at 8% -8%, rgba(15,110,106,0.16), transparent 60%),
+      radial-gradient(900px 480px at 96% 0%, rgba(217,142,49,0.14), transparent 55%),
+      radial-gradient(1000px 600px at 50% 115%, rgba(37,99,235,0.10), transparent 60%),
+      linear-gradient(180deg, #EEF2F6 0%, #E9EEF4 100%);
+    background-attachment: fixed;
+    min-height:100vh;
+  }
+  .mono{font-family:'IBM Plex Mono',monospace;}
+  .disp{font-family:'Space Grotesk',sans-serif;}
+  ::-webkit-scrollbar{height:8px;width:8px;}
+  ::-webkit-scrollbar-thumb{background:#C7D0DB;border-radius:8px;}
+
+  header{
+    background: linear-gradient(120deg, #0B1220 0%, #0F2036 45%, #123A3A 100%);
+    color:#fff;padding:22px 32px;
+    box-shadow: 0 2px 24px rgba(11,18,32,0.25);
+  }
+  .head-row{display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:16px;}
+  .brand{display:flex;gap:14px;align-items:center;}
+  .brand-icon{width:42px;height:42px;border-radius:10px;background:var(--brand);display:flex;align-items:center;justify-content:center;font-size:20px;}
+  .brand-title{font-size:20px;font-weight:700;letter-spacing:.2px;}
+  .brand-sub{font-size:12.5px;color:#9FB0C3;margin-top:2px;}
+  .live-dot{display:inline-block;width:7px;height:7px;border-radius:99px;background:#22C55E;margin-right:6px;box-shadow:0 0 0 3px rgba(34,197,94,.25);}
+  .controls{display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
+  .sbu-wrap{position:relative;}
+  .btn-dark{background:#12324A;color:#fff;border:1px solid #1E4A63;border-radius:8px;padding:9px 14px;display:flex;gap:8px;align-items:center;cursor:pointer;font-size:13.5px;font-weight:600;font-family:inherit;}
+  .sbu-menu{position:absolute;top:42px;right:0;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 8px 24px rgba(0,0,0,.25);z-index:20;min-width:130px;display:none;}
+  .sbu-menu.open{display:block;}
+  .sbu-item{padding:9px 14px;font-size:13.5px;color:var(--ink);cursor:pointer;}
+  .sbu-item:hover{background:#F2F5F8;}
+  .sbu-item.active{background:#EEF2F6;font-weight:700;}
+  .day-pill{background:#12324A;border-radius:8px;padding:8px 14px;font-size:13px;display:flex;align-items:center;gap:8px;color:#9FB0C3;}
+  .day-pill input{width:40px;background:transparent;border:none;color:#fff;font-weight:700;font-size:14px;outline:none;font-family:'IBM Plex Mono',monospace;}
+  .btn-outline{background:transparent;border:1px solid #2A4E68;color:#CBD8E4;border-radius:8px;padding:9px 14px;font-size:13px;cursor:pointer;font-family:inherit;}
+  .btn-outline:hover{background:#12324A;}
+  .btn-solid{background:var(--brand);color:#fff;border:none;border-radius:8px;padding:10px 18px;font-size:13px;font-weight:700;cursor:pointer;display:flex;gap:8px;align-items:center;font-family:inherit;}
+  .btn-download{background:var(--amber);}
+
+  #settingsPanel{margin-top:16px;background:#0F1B2E;border:1px solid #1E3348;border-radius:10px;padding:16px;display:none;}
+  #settingsPanel.open{display:block;}
+  .settings-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:14px;}
+  .settings-grid label{font-size:11.5px;color:#9FB0C3;}
+  .settings-grid input{width:100%;margin-top:4px;background:#12324A;border:1px solid #24506B;border-radius:6px;padding:6px 8px;color:#fff;font-size:12.5px;font-family:'IBM Plex Mono',monospace;}
+  .settings-note{font-size:11.5px;color:#D98E31;margin-bottom:10px;}
+
+  main{max-width:1240px;margin:0 auto;padding:26px 32px 60px;}
+
+  .summary-strip{display:grid;grid-template-columns:repeat(6,1fr);gap:14px;margin-bottom:22px;}
+  .summary-card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px 18px;border-top:3px solid var(--brand);box-shadow:0 1px 3px rgba(11,18,32,0.04);}
+  .summary-card.c-blue{border-top-color:#2563EB;}
+  .summary-card.c-purple{border-top-color:#7C3AED;}
+  .summary-card.c-cyan{border-top-color:#0891B2;}
+  .summary-card.c-orange{border-top-color:#EA580C;}
+  .summary-label{font-size:10.5px;letter-spacing:.3px;text-transform:uppercase;color:#8B98A8;font-weight:700;margin-bottom:8px;}
+  .summary-value{font-size:22px;font-weight:700;}
+  .summary-sub{font-size:11.5px;color:#8B98A8;margin-top:5px;}
+  .summary-compare{font-size:11px;font-weight:700;margin-top:7px;padding:3px 8px;border-radius:999px;display:inline-block;font-family:'IBM Plex Mono',monospace;}
+  @media(max-width:1080px){ .summary-strip{grid-template-columns:repeat(3,1fr);} }
+  @media(max-width:640px){ .summary-strip{grid-template-columns:1fr 1fr;} }
+
+  .charts-row{display:grid;grid-template-columns:1.1fr 1fr;gap:14px;margin-bottom:22px;}
+  .chart-card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px 20px;border-top:3px solid #7C3AED;box-shadow:0 1px 3px rgba(11,18,32,0.04);}
+  .chart-card:first-child{border-top-color:#2563EB;}
+  .chart-title{font-weight:700;font-size:15px;margin-bottom:4px;}
+  .chart-sub{font-size:11.5px;color:#8B98A8;margin-bottom:10px;}
+  .chart-canvas-wrap{position:relative;height:300px;}
+
+  .table-card{background:#fff;border-radius:14px;border:1px solid var(--line);border-top:3px solid var(--brand);overflow:hidden;margin-bottom:22px;box-shadow:0 1px 3px rgba(11,18,32,0.04);}
+  .table-head{padding:16px 20px;border-bottom:1px solid #EEF2F6;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;}
+  .table-title{font-weight:700;font-size:15.5px;}
+  .table-note{font-size:12px;color:var(--soft);}
+  .table-scroll{overflow-x:auto;}
+  table{width:100%;border-collapse:collapse;min-width:980px;}
+  thead tr{background:#F7F9FB;text-align:left;}
+  th{padding:10px 16px;font-size:11.5px;letter-spacing:.4px;text-transform:uppercase;color:var(--soft);font-weight:700;white-space:nowrap;}
+  td{padding:13px 16px;font-size:13.5px;border-top:1px solid #EEF2F6;}
+  tr.rowline:hover{background:#FAFBFC;}
+  .kpi-input{width:88px;border:1px solid var(--line);border-radius:6px;padding:6px 8px;font-size:13px;font-family:'IBM Plex Mono',monospace;}
+  .badge{font-size:10.5px;font-weight:700;letter-spacing:.4px;padding:4px 9px;border-radius:999px;}
+  .pace-bar-wrap{position:relative;height:16px;background:#EEF2F6;border-radius:6px;width:150px;}
+  .pace-bar-fill{position:absolute;left:0;top:0;bottom:0;border-radius:6px;transition:width .3s;}
+  .pace-marker{position:absolute;top:-3px;bottom:-3px;width:2px;background:#0B1220;}
+  .pace-pct-label{position:absolute;right:-4px;top:18px;font-size:10.5px;color:var(--soft);font-family:'IBM Plex Mono',monospace;}
+  .table-footer{padding:14px 20px;border-top:1px solid #EEF2F6;display:flex;justify-content:space-between;align-items:center;background:#FAFBFC;flex-wrap:wrap;gap:10px;}
+
+  .commentary-row{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:22px;}
+  .callout{background:#fff;border-radius:12px;padding:16px 18px;border:1px solid;}
+  .callout-head{display:flex;align-items:center;gap:8px;margin-bottom:8px;}
+  .callout-label{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--soft);}
+  .callout-metric{font-size:16px;font-weight:700;}
+  .callout-msg{font-size:13px;color:#33404F;margin-top:4px;}
+  .callout-pace{font-size:12.5px;margin-top:6px;font-weight:700;font-family:'IBM Plex Mono',monospace;}
+
+  .comments-card{background:#fff;border-radius:14px;border:1px solid var(--line);padding:18px 20px;}
+  .comment-row{display:flex;gap:12px;align-items:flex-start;padding:10px 12px;border-radius:9px;background:#FAFBFC;border:1px solid #EEF2F6;margin-bottom:10px;}
+  .comment-dot{width:8px;height:8px;border-radius:99px;margin-top:5px;flex-shrink:0;}
+  .comment-kpi{font-weight:700;font-size:13px;}
+  .comment-text{font-size:13px;color:#33404F;}
+
+  .loading-banner{text-align:center;padding:60px 20px;color:var(--soft);font-size:14px;}
+  .error-banner{background:#FEF2F2;border:1px solid #FCA5A5;color:#B91C1C;border-radius:10px;padding:14px 18px;font-size:13px;margin-bottom:18px;}
+
+  footer{text-align:center;font-size:11.5px;color:#8B98A8;margin-top:22px;}
+  .nf{color:#C6423F;font-weight:700;font-family:'IBM Plex Mono',monospace;font-size:12px;}
+  @media(max-width:820px){
+    .charts-row,.commentary-row,.settings-grid{grid-template-columns:1fr;}
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="head-row">
+    <div class="brand">
+      <div class="brand-icon">&#127981;</div>
+      <div>
+        <div class="disp brand-title">Daily Pacing Dashboard</div>
+        <div class="brand-sub"><span class="live-dot"></span>Live from MCP DWH + Supabase â€” Production &amp; Performance Tracker</div>
+      </div>
+    </div>
+    <div class="controls">
+      <div class="sbu-wrap">
+        <button class="btn-dark" id="sbuBtn">Loading&hellip; &#9662;</button>
+        <div class="sbu-menu" id="sbuMenu"></div>
+      </div>
+      <div class="sbu-wrap">
+        <button class="btn-dark" id="monthBtn">Month &#9662;</button>
+        <div class="sbu-menu" id="monthMenu"></div>
+      </div>
+      <div class="day-pill">
+        <span>Day</span>
+        <input type="number" id="dayInput" min="1" value="1" />
+        <span id="dayOfLabel">/ 31</span>
+      </div>
+      <button class="btn-outline" id="settingsBtn">Edit targets</button>
+      <button class="btn-solid btn-download" id="downloadBtn">&#8681; Save as HTML</button>
+    </div>
+  </div>
+  <div id="settingsPanel">
+    <div class="settings-note">Editing here only changes this view in your browser â€” it does not write back to the DWH. Targets are read from MCP DWH (<code>pms.tblTargetSetupArc</code>) and cannot be updated from here.</div>
+    <div class="settings-grid" id="settingsGrid"></div>
+    <div style="display:flex;gap:10px;">
+      <button class="btn-solid" id="saveSettingsBtn">Save (local)</button>
+      <button class="btn-outline" id="cancelSettingsBtn">Cancel</button>
+    </div>
+  </div>
+</header>
+
+<main>
+  <div id="loadingBanner" class="loading-banner">Loading data from MCP DWH + Supabase&hellip;</div>
+  <div id="errorBanner" class="error-banner" style="display:none;"></div>
+
+  <div id="dashboardBody" style="display:none;">
+    <div class="summary-strip">
+      <div class="summary-card" style="border-top-color:#DB2777;">
+        <div class="summary-label">Kaizen (to-date)</div>
+        <div class="summary-value mono" id="kaizenVal" style="color:#DB2777">-</div>
+        <div class="summary-sub" id="kaizenSub">-</div>
+        <div class="summary-compare" id="kaizenCompare"></div>
+      </div>
+      <div class="summary-card c-blue">
+        <div class="summary-label">Production actual (today)</div>
+        <div class="summary-value mono" id="prodActualVal" style="color:#2563EB">-</div>
+        <div class="summary-sub" id="prodActualSub">-</div>
+        <div class="summary-compare" id="prodActualCompare"></div>
+      </div>
+      <div class="summary-card c-purple">
+        <div class="summary-label">Capacity utilization (today)</div>
+        <div class="summary-value mono" id="capActualVal" style="color:#7C3AED">-</div>
+        <div class="summary-sub" id="capActualSub">-</div>
+        <div class="summary-compare" id="capActualCompare"></div>
+      </div>
+      <div class="summary-card c-cyan">
+        <div class="summary-label">OEE actual (today)</div>
+        <div class="summary-value mono" id="oeeActualVal" style="color:#0891B2">-</div>
+        <div class="summary-sub" id="oeeActualSub">-</div>
+        <div class="summary-compare" id="oeeActualCompare"></div>
+      </div>
+      <div class="summary-card" style="border-top-color:#16A34A;">
+        <div class="summary-label">5S Score (to-date avg)</div>
+        <div class="summary-value mono" id="s5Val" style="color:#16A34A">-</div>
+        <div class="summary-sub" id="s5Sub">-</div>
+        <div class="summary-compare" id="s5Compare"></div>
+      </div>
+      <div class="summary-card" style="border-top-color:#C6423F;">
+        <div class="summary-label">Wastage (to-date avg)</div>
+        <div class="summary-value mono" id="wasteActualVal" style="color:#C6423F">-</div>
+        <div class="summary-sub" id="wasteActualSub">-</div>
+        <div class="summary-compare" id="wasteActualCompare"></div>
+      </div>
+    </div>
+
+    <div class="charts-row">
+      <div class="chart-card">
+        <div class="disp chart-title">Pace % by KPI</div>
+        <div class="chart-sub" id="paceChartSub">100% line = on target for today</div>
+        <div class="chart-canvas-wrap"><canvas id="paceChart"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <div class="disp chart-title">Production Budget â€” cumulative trend</div>
+        <div class="chart-sub">Actual vs. expected pace, day by day</div>
+        <div class="chart-canvas-wrap"><canvas id="trendChart"></canvas></div>
+      </div>
+    </div>
+
+    <div class="table-card">
+      <div class="table-head">
+        <div class="disp table-title" id="tableTitle">KPI Pacing</div>
+        <div class="table-note">Expected-to-date = target &times; day-elapsed ratio</div>
+      </div>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>KPI</th><th>Monthly TGT</th><th>Today's target</th><th>Today's actual</th>
+              <th>To-date actual</th><th>Expected to-date</th><th>Pace</th><th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="tableBody"></tbody>
+        </table>
+      </div>
+      <div class="table-footer">
+        <div class="table-note" id="footerNote">Figures below are pulled live from MCP DWH for the selected day.</div>
+        <button class="btn-solid" id="saveDayBtn">&#128190; Override (local)</button>
+      </div>
+    </div>
+
+    <div class="comments-card">
+      <div class="disp table-title" style="margin-bottom:12px;" id="commentsTitle">Daily Comments â€” Day 1</div>
+      <div id="commentsFeed"></div>
+    </div>
+
+    <div class="table-card" style="margin-top:22px;">
+      <div class="table-head">
+        <div class="disp table-title" id="nptTitle">NPT &amp; Breakdown Analysis â€” Day 1</div>
+        <div class="table-note">Today's NPT + top 5 breakdown reasons by downtime</div>
+      </div>
+      <div style="padding:18px 20px 4px;">
+        <div class="summary-card" style="border-top-color:#C6423F;max-width:220px;">
+          <div class="summary-label">Today's NPT</div>
+          <div class="summary-value mono" id="nptTodayVal" style="color:var(--red)">-</div>
+          <div class="summary-sub" id="nptTodaySub">-</div>
+        </div>
+      </div>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>#</th><th>Breakdown Name</th><th>Reason</th><th>Downtime</th>
+            </tr>
+          </thead>
+          <tbody id="breakdownTableBody"></tbody>
+        </table>
+      </div>
+      <div class="table-footer" style="display:block;">
+        <div class="table-note" style="margin-bottom:6px;font-weight:700;color:var(--ink);">Month-to-date breakdown summary</div>
+        <div class="table-note" id="breakdownComment" style="line-height:1.6;">-</div>
+      </div>
+    </div>
+
+    <div class="table-card" style="margin-top:22px;border-top-color:#0F6E6A;" id="mitigationCard">
+      <div class="table-head">
+        <div class="disp table-title" id="mpTitle">Mitigation Plan â€” Day 1</div>
+        <div class="table-note" id="mpSub">Specific next steps for anything not on pace, ranked by priority</div>
+      </div>
+      <div style="padding:16px 20px 4px;display:flex;gap:10px;flex-wrap:wrap;" id="mpSummaryStrip"></div>
+      <div style="padding:6px 20px 20px;" id="mitigationList"></div>
+    </div>
+  </div>
+
+  <footer>Live snapshot from MCP DWH (production, OEE, capacity, waste, yield, NPT, OT hours, manpower, training, project, targets) + Supabase (Kaizen, QCP Audit, 5S Score) &middot; <span id="footerMonth">live month</span></footer>
+</main>
+
+<script>
+// =========================================================
+// Data sources:
+//   - MCP DWH (SQL Server "DWH"): embedded snapshot of production,
+//     OEE, capacity, waste, yield, NPT, breakdown, OT hours,
+//     manpower, training, project + monthly targets.
+//   - Supabase (live fetch): Kaizen, QCP Audit, 5S Score (not in DWH).
+// KPIs with no source are labelled "NOT FOUND IN MCP DWH".
+// =========================================================
+let DWH_DATA = null;
+
+const NOT_FOUND = "NOT FOUND IN MCP DWH";
+
+// Which KPI each metric maps to and how its daily value is derived.
+const METRIC_META = [
+  { id:"prod_budget",    label:"Production Budget", type:"flow"  },
+  { id:"cap_util",       label:"Capacity Utilization", type:"level" },
+  { id:"oee",            label:"OEE", type:"level" },
+  { id:"manpower",       label:"Manpower", type:"level" },
+  { id:"ot",             label:"OT (Hours)", type:"flow" },
+  { id:"OT",             label:"OT Amount", type:"flow" },
+  { id:"kaizen",         label:"Kaizen", type:"flow" },
+  { id:"qcp_audit",      label:"QCP Audit", type:"flow" },
+  { id:"5s_score",       label:"5S Score", type:"level" },
+  { id:"training",       label:"Training", type:"flow" },
+  { id:"project",        label:"Project", type:"flow" },
+  { id:"kaizen_savings", label:"Kaizen Savings", type:"flow" },
+  { id:"Yeild",          label:"Yield", type:"level" },
+  { id:"waste",          label:"Wastage", type:"level" },
+];
+
+const VIVID = ["#2563EB","#7C3AED","#DB2777","#EA580C","#16A34A","#0891B2","#CA8A04","#DC2626","#4F46E5","#059669","#0D9488","#9333EA"];
+
+// KPIs where LESS is better â€” exceeding target is bad, not good.
+const LOWER_IS_BETTER = { ot:true, OT:true, manpower:true, waste:true };
+// KPIs whose target is already a per-day figure (not a monthly total).
+const PER_DAY_TARGET_METRICS = { "ot": true };
+// KPIs whose data does not exist anywhere in MCP DWH AND is not read from
+// Supabase (kaizen savings actual, OT amount).
+const DWH_NOT_FOUND = { kaizen_savings:true, OT:true };
+// KPIs read live from Supabase instead of DWH.
+const SUPABASE_METRICS = { kaizen:true, qcp_audit:true, "5s_score":true };
+
+// Display units (DWH raw values; set here for presentation only).
+const UNITS = {
+  prod_budget:"MT", cap_util:"%", oee:"%", manpower:"ppl",
+  ot:"hrs", OT:"BDT", kaizen:"nos", qcp_audit:"nos",
+  "5s_score":"%", training:"nos", project:"%", kaizen_savings:"BDT",
+  Yeild:"%", waste:"%"
+};
+
+const fmt = n => (n===null||n===undefined||isNaN(n)) ? "-" : Number(n).toLocaleString("en-US",{maximumFractionDigits:1});
+
+// ---- Supabase supplement (Kaizen, QCP Audit, 5S Score) ----
+// These three KPIs do not exist in the DWH, so they are read live from
+// Supabase (the original source) and merged into the DWH snapshot at runtime.
+const SUPABASE_URL = "https://vpwbcuxwxkqvauffqooj.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZwd2JjdXh3eGtxdmF1ZmZxb29qIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM4MjA4NjEsImV4cCI6MjA5OTM5Njg2MX0.iAoIZXl-2G7h3wm4jcYsEs6-wdN-YKTS-KbBteBBzUk";
+const SBU_CANDIDATES = {
+  "AEFML": ["AEFML", "AEL", "AEL(Flour)", "AEL (Flour)"],
+  "AAFL":  ["AAFL", "AKIJ FEED"],
+  "FAL":   ["FAL", "KRAL"],
+  "MRML":  ["MRML", "HRML"],
+};
+function sbuFilterParam(displaySbu){
+  const candidates = SBU_CANDIDATES[displaySbu] || [displaySbu];
+  const list = candidates.map(v => encodeURIComponent(v)).join(",");
+  return `sbu=in.(${list})`;
+}
+function dayOfMonth(dateStr){
+  if(!dateStr) return null;
+  let y, mo, d;
+  if(/^\d{4}-\d{2}-\d{2}/.test(dateStr)){
+    y = Number(dateStr.slice(0,4)); mo = Number(dateStr.slice(5,7)); d = Number(dateStr.slice(8,10));
+  } else {
+    const m = String(dateStr).match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+    if(!m) return null;
+    mo = Number(m[1]); d = Number(m[2]); y = Number(m[3]);
+  }
+  if(y!==DWH_DATA.meta.year || mo!==DWH_DATA.meta.month || !d) return null;
+  return d;
+}
+async function pgFetch(table, query){
+  const url = `${SUPABASE_URL}/rest/v1/${encodeURIComponent(table)}?${query}`;
+  let res;
+  try{
+    res = await fetch(url, {
+      headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` }
+    });
+  }catch(networkErr){
+    throw new Error(`Network error reaching Supabase for "${table}": ${networkErr.message}.`);
+  }
+  if(!res.ok){
+    let detail = ""; try{ detail = await res.text(); }catch(e){}
+    throw new Error(`Supabase returned ${res.status} for "${table}": ${detail}`);
+  }
+  return res.json();
+}
+async function loadSupabaseSupplement(displaySbu){
+  const sbuQ = sbuFilterParam(displaySbu);
+  const monthQ = `month=eq.${encodeURIComponent(DWH_DATA.meta.monthName)}`;
+  const [tgtData, icData, qcpData, fsData] = await Promise.all([
+    pgFetch("ACCL_KPI_TARGET", `select=kpi_id,monthly_target&${sbuQ}&${monthQ}`),
+    pgFetch("accl_improvement_cards", `select=created_date&${sbuQ}&hidden=eq.false`),
+    pgFetch("qcp_audit", `select=audit_date&${sbuQ}`),
+    pgFetch("accl_5s_audit_entries", `select=audit_timestamp,final_score_pct&${sbuQ}`),
+  ]);
+  const targets = {};
+  (tgtData||[]).forEach(r=>{
+    if(!SUPABASE_METRICS[r.kpi_id]) return;
+    const raw = (r.monthly_target===null||r.monthly_target===undefined) ? null : String(r.monthly_target).replace(/,/g,"").trim();
+    const val = (raw===null||raw==="") ? null : Number(raw);
+    targets[r.kpi_id] = (val===null||isNaN(val)) ? null : val;
+  });
+  const daily = {};
+  for(let d=1; d<=31; d++) daily[d] = {};
+  (icData||[]).forEach(r=>{
+    if(!r.created_date) return;
+    const d = dayOfMonth(r.created_date); if(d===null) return;
+    daily[d].kaizen = (daily[d].kaizen||0) + 1;
+  });
+  (qcpData||[]).forEach(r=>{
+    const d = dayOfMonth(r.audit_date); if(d===null) return;
+    daily[d].qcp_audit = (daily[d].qcp_audit||0) + 1;
+  });
+  const s5Sum = {}, s5Count = {};
+  (fsData||[]).forEach(r=>{
+    if(!r.audit_timestamp || r.final_score_pct===null || r.final_score_pct===undefined) return;
+    const d = dayOfMonth(r.audit_timestamp); if(d===null) return;
+    s5Sum[d] = (s5Sum[d]||0) + Number(r.final_score_pct);
+    s5Count[d] = (s5Count[d]||0) + 1;
+  });
+  Object.keys(s5Sum).forEach(d=>{ daily[d]["5s_score"] = s5Sum[d]/s5Count[d]; });
+  return { targets, daily };
+}
+async function applySupplement(displaySbu){
+  const s = state[displaySbu];
+  if(!s) return;
+  try{
+    const sup = await loadSupabaseSupplement(displaySbu);
+    Object.keys(sup.targets).forEach(id => { s.targets[id] = sup.targets[id]; });
+    for(let d=1; d<=s.totalDays; d++){
+      if(sup.daily[d]){
+        s.dayLog[d] = Object.assign({}, s.dayLog[d], sup.daily[d]);
+      }
+    }
+  }catch(err){
+    console.error("Supabase supplement failed for "+displaySbu+":", err);
+  }
+}
+
+let state = {};       // displaySbu -> {totalDays, today, targets, units, dayLog, breakdown...}
+let SBUS = [];
+let currentSbu = null;
+let draft = {};
+let paceChart, trendChart;
+
+// ---- build state from the embedded DWH snapshot ----
+function buildState(sbuData){
+  const totalDays = DWH_DATA.meta.totalDays;
+  const dayLog = {};
+  Object.keys(sbuData.dayLog || {}).forEach(k => { dayLog[Number(k)] = sbuData.dayLog[k]; });
+  const targets = Object.assign({}, sbuData.targets || {});
+  return {
+    totalDays,
+    today: sbuData.today || totalDays,
+    targets,
+    units: Object.assign({}, UNITS),
+    dayLog,
+    projectName: null,
+    breakdownByDay: sbuData.breakdownByDay || {},
+    breakdownByReason: sbuData.breakdownByReason || {},
+    totalDowntime: sbuData.totalDowntime || 0,
+  };
+}
+
+function getMetricsList(s){
+  return METRIC_META.map(m=>({
+    ...m,
+    unit: s.units[m.id] || "",
+    tgt: (s.targets[m.id]!==undefined) ? s.targets[m.id] : null,
+  }));
+}
+
+// ---- pacing math (same logic as the original template) ----
+function paceColor(pct){
+  if(pct===null) return "#5B6B7E";
+  if(pct>=100) return "#0F6E6A";
+  if(pct>=90) return "#D98E31";
+  return "#C6423F";
+}
+function paceLabel(pct){
+  if(pct===null) return "TRACKING";
+  if(pct>=100) return "ON PACE";
+  if(pct>=90) return "WATCH";
+  return "BEHIND";
+}
+
+function computeMetrics(s){
+  const { totalDays, today, dayLog } = s;
+  const METRICS = getMetricsList(s);
+  return METRICS.map(m=>{
+    // Not present anywhere in MCP DWH.
+    if(DWH_NOT_FOUND[m.id]){
+      return {...m, tgt:m.tgt, dailyTarget:null, expectedToDate:null,
+        cumulativeActual:null, todayActual:null, daysLogged:0, monthlyProgress:null,
+        pacePct:null, shortfallMsg:NOT_FOUND, notFound:true};
+    }
+
+    const tgt = m.tgt;
+    let dailyTarget, expectedToDate;
+    let cumulativeActual=null, todayActual=null, daysLogged=0, sumForAvg=0;
+
+    if(m.type==="flow"){
+      if(PER_DAY_TARGET_METRICS[m.id]){
+        dailyTarget = tgt ? tgt : null;
+        expectedToDate = null;
+      } else {
+        dailyTarget = tgt ? tgt/totalDays : null;
+        expectedToDate = tgt ? (tgt*today)/totalDays : null;
+      }
+      let sum=0, has=false;
+      for(let d=1; d<=today; d++){
+        const v = dayLog[d] && dayLog[d][m.id];
+        if(v!==undefined && v!==null && v!==""){ sum+=Number(v); has=true; }
+      }
+      cumulativeActual = PER_DAY_TARGET_METRICS[m.id] ? null : (has ? sum : 0);
+      todayActual = (dayLog[today] && dayLog[today][m.id]!==undefined) ? Number(dayLog[today][m.id]) : null;
+    } else {
+      dailyTarget = tgt;
+      expectedToDate = tgt;
+      for(let d=1; d<=today; d++){
+        const v = dayLog[d] && dayLog[d][m.id];
+        if(v!==undefined && v!==null && v!==""){ sumForAvg += Number(v); daysLogged++; }
+      }
+      cumulativeActual = daysLogged>0 ? sumForAvg/daysLogged : null;
+      todayActual = (dayLog[today] && dayLog[today][m.id]!==undefined) ? Number(dayLog[today][m.id]) : null;
+    }
+
+    const lowerBetter = !!LOWER_IS_BETTER[m.id];
+    const monthlyTgt = PER_DAY_TARGET_METRICS[m.id] ? null : tgt;
+    const monthlyProgress = (monthlyTgt && cumulativeActual!==null) ? (cumulativeActual/monthlyTgt)*100 : null;
+    let pacePct = null;
+    if(PER_DAY_TARGET_METRICS[m.id]){
+      if(tgt && dailyTarget){
+        const actualForPace = todayActual ?? 0;
+        if(lowerBetter){
+          pacePct = actualForPace<=0 ? 200 : Math.min((dailyTarget/actualForPace)*100, 200);
+        } else {
+          pacePct = (actualForPace/dailyTarget)*100;
+        }
+      }
+    } else if(tgt && expectedToDate){
+      const actualForPace = cumulativeActual!==null ? cumulativeActual : 0;
+      if(lowerBetter){
+        pacePct = actualForPace<=0 ? 200 : Math.min((expectedToDate/actualForPace)*100, 200);
+      } else {
+        pacePct = (actualForPace/expectedToDate)*100;
+      }
+    }
+
+    let shortfallMsg=null;
+    if(!tgt){
+      shortfallMsg = SUPABASE_METRICS[m.id] ? "No target set in Supabase." : ("Target " + NOT_FOUND + ".");
+    } else if(tgt && dailyTarget!==null){
+      if(m.type==="flow"){
+        const tVal = todayActual ?? 0;
+        const gap = dailyTarget - tVal;
+        if(lowerBetter){
+          if(todayActual===null) shortfallMsg = "No entry logged today â€” today's limit is "+fmt(dailyTarget)+" "+m.unit+".";
+          else if(gap<-0.0001){
+            const over = -gap;
+            const allowedTomorrow = Math.max(dailyTarget-over, 0);
+            shortfallMsg = PER_DAY_TARGET_METRICS[m.id]
+              ? "Exceeded today's limit by "+fmt(over)+" "+m.unit+". Stay under "+fmt(dailyTarget)+" "+m.unit+" tomorrow."
+              : "Exceeded today's limit by "+fmt(over)+" "+m.unit+". Tomorrow should stay under "+fmt(allowedTomorrow)+" "+m.unit+" to recover the monthly budget.";
+          } else shortfallMsg = "Within today's limit ("+fmt(tVal)+" of "+fmt(dailyTarget)+" "+m.unit+" allowed).";
+        } else {
+          if(todayActual===null) shortfallMsg = "No entry logged today â€” day's pace target is "+fmt(dailyTarget)+" "+m.unit+".";
+          else if(gap>0.0001) shortfallMsg = "Missed today's pace by "+fmt(gap)+" "+m.unit+". Tomorrow needs "+fmt(dailyTarget+gap)+" "+m.unit+" to get back on pace.";
+          else shortfallMsg = "Today's pace target met ("+fmt(dailyTarget)+" "+m.unit+").";
+        }
+      } else {
+        if(cumulativeActual===null){
+          shortfallMsg = lowerBetter
+            ? "No readings logged yet â€” ceiling target is "+fmt(tgt)+m.unit+"."
+            : "No readings logged yet â€” target average is "+fmt(tgt)+m.unit+".";
+        } else if(lowerBetter){
+          if(cumulativeActual > tgt){
+            const overAvg = cumulativeActual - tgt;
+            const allowedTomorrow = tgt*(daysLogged+1) - sumForAvg;
+            shortfallMsg = "Running average is "+fmt(overAvg)+m.unit+" over the ceiling target. Tomorrow's reading should be at most "+fmt(allowedTomorrow)+m.unit+" to pull the average back to target.";
+          } else {
+            shortfallMsg = "Running average is within the ceiling target ("+fmt(tgt)+m.unit+").";
+          }
+        } else if(cumulativeActual < tgt){
+          const gapAvg = tgt - cumulativeActual;
+          const neededTomorrow = tgt*(daysLogged+1) - sumForAvg;
+          shortfallMsg = "Running average is "+fmt(gapAvg)+m.unit+" below target. Tomorrow's reading needs to be "+fmt(neededTomorrow)+m.unit+" to pull the average up to target.";
+        } else {
+          shortfallMsg = "Running average is at or above target ("+fmt(tgt)+m.unit+").";
+        }
+      }
+    }
+
+    return {...m, tgt, dailyTarget, expectedToDate, cumulativeActual, todayActual, daysLogged, monthlyProgress, pacePct, shortfallMsg, notFound:false};
+  });
+}
+
+function buildTrend(s, metricId){
+  const { totalDays, today, dayLog } = s;
+  const tgt = s.targets[metricId];
+  const dailyTarget = PER_DAY_TARGET_METRICS[metricId] ? (tgt||0) : (tgt ? tgt/totalDays : 0);
+  let running=0;
+  const days=[], actual=[], expected=[];
+  for(let d=1; d<=today; d++){
+    const v = dayLog[d] && dayLog[d][metricId];
+    running += (v!==undefined && v!==null && v!=="") ? Number(v) : 0;
+    days.push(d); actual.push(running); expected.push(dailyTarget*d);
+  }
+  return {days, actual, expected};
+}
+
+// ---- NPT & breakdown analysis ----
+function renderBreakdownSection(s){
+  document.getElementById("nptTitle").textContent = "NPT & Breakdown Analysis â€” Day "+s.today;
+
+  const todayNpt = s.dayLog[s.today] ? s.dayLog[s.today].npt_pct : undefined;
+  document.getElementById("nptTodayVal").textContent = (todayNpt!==undefined && todayNpt!==null && !isNaN(todayNpt)) ? fmt(todayNpt)+"%" : "\u2014";
+  const todayRecs = (s.breakdownByDay && s.breakdownByDay[String(s.today)]) || [];
+  const todayDowntime = todayRecs.reduce((sum,r)=>sum+r.downtime,0);
+  document.getElementById("nptTodaySub").textContent = todayRecs.length
+    ? todayRecs.length+" breakdown"+(todayRecs.length>1?"s":"")+" logged \u00b7 "+fmt(todayDowntime)+" min downtime"
+    : "No breakdowns logged today";
+
+  const todayByReason = {};
+  todayRecs.forEach(r=>{
+    const key = r.reason || "(unspecified)";
+    if(!todayByReason[key]) todayByReason[key] = { name:r.name, reason:key, downtime:0 };
+    todayByReason[key].downtime += r.downtime;
+  });
+  const top5 = Object.values(todayByReason).sort((a,b)=>b.downtime-a.downtime).slice(0,5);
+  const tbody = document.getElementById("breakdownTableBody");
+  tbody.innerHTML = top5.length ? top5.map((r,i)=>`
+    <tr class="rowline">
+      <td class="mono" style="color:var(--soft);">${i+1}</td>
+      <td style="font-weight:600;">${r.name||"\u2014"}</td>
+      <td style="color:#33404F;">${r.reason}</td>
+      <td class="mono" style="font-weight:600;">${fmt(r.downtime)} min</td>
+    </tr>`).join("") : `<tr><td colspan="4" style="color:var(--soft);padding:16px;">No breakdowns logged today.</td></tr>`;
+
+  const reasons = Object.entries(s.breakdownByReason || {}).sort((a,b)=>b[1].totalDowntime - a[1].totalDowntime);
+  const commentEl = document.getElementById("breakdownComment");
+  if(!reasons.length){
+    commentEl.textContent = "No breakdowns logged so far this month.";
+  } else {
+    const [topReasonName, topReasonData] = reasons[0];
+    const topShare = s.totalDowntime ? ((topReasonData.totalDowntime/s.totalDowntime)*100) : 0;
+    const otherTop = reasons.slice(1,3).map(([name,d])=>name+" ("+fmt(d.totalDowntime)+" min)").join(", ");
+    commentEl.innerHTML =
+      "Month-to-date, total breakdown downtime across "+currentSbu+" is <strong>"+fmt(s.totalDowntime)+" minutes</strong> across "+reasons.length+" distinct reasons. "+
+      "The single largest contributor is <strong>\""+topReasonName+"\"</strong> at "+fmt(topReasonData.totalDowntime)+" min ("+fmt(topShare)+"% of all downtime, "+topReasonData.count+" occurrence"+(topReasonData.count>1?"s":"")+")"+
+      (otherTop ? ", followed by "+otherTop : "")+". "+
+      "<span style='color:var(--red);font-weight:600;'>Recommendation:</span> prioritize root-cause action on \""+topReasonName+"\" â€” schedule a focused maintenance/CAPA review and track recurrence daily, since it accounts for the largest share of lost production time this month. Recurring breakdowns on the same equipment should be escalated to preventive maintenance rather than repeated reactive fixes.";
+  }
+}
+
+// ---- mitigation engine ----
+const KPI_IMPACT = {
+  prod_budget: "High", cap_util: "High", oee: "High", Waste: "High", Yeild: "High",
+  manpower: "Medium", ot: "Medium", OT: "Medium", qcp_audit: "Medium", project: "Medium",
+  kaizen: "Low", "5s_score": "Low", training: "Low", kaizen_savings: "Low",
+};
+const SHORT_ACTION = {
+  prod_budget: "Add catch-up capacity (extra shift/line) and clear the top NPT cause first.",
+  cap_util: "Rebalance manpower/scheduling to lift utilization on the constrained line.",
+  oee: "Target the single largest downtime reason â€” OEE loss is usually concentrated in one driver.",
+  manpower: "Review headcount plan vs. actual attendance; expedite backfill or hiring.",
+  ot: "Audit OT approvals â€” confirm the extra hours are earning output, not just covering gaps.",
+  OT: "Review OT cost against the production gain it bought; tighten the approval threshold.",
+  kaizen: "Prompt supervisors for kaizen submissions in the daily huddle.",
+  qcp_audit: "Schedule the outstanding QCP audits before month-end.",
+  "5s_score": "Run a focused 5S walk on the lowest-scoring area this week.",
+  training: "Book the remaining sessions now to avoid a month-end pile-up.",
+  project: "Review the project plan with its owner and name the blocking task.",
+  kaizen_savings: "Prioritize kaizen ideas with quantified savings for sign-off.",
+  Waste: "Root-cause the top scrap/waste driver on the highest-loss line.",
+  Yeild: "Investigate the gap between total and good production â€” trace rejects/rework to the responsible line or shift.",
+};
+function priorityFor(status, impact){
+  if(status==="ON PACE") return {label:"On track", rank:0, color:"#0F6E6A"};
+  if(status==="TRACKING") return {label:"Info only", rank:-1, color:"#5B6B7E"};
+  if(status==="BEHIND"){
+    if(impact==="High")   return {label:"Critical â€” act today", rank:4, color:"#C6423F"};
+    if(impact==="Medium") return {label:"High â€” act this week", rank:3, color:"#C6423F"};
+    return {label:"Medium â€” track", rank:2, color:"#D98E31"};
+  }
+  if(impact==="High")   return {label:"High â€” monitor closely", rank:2.5, color:"#D98E31"};
+  if(impact==="Medium") return {label:"Medium â€” monitor", rank:1.5, color:"#D98E31"};
+  return {label:"Low â€” monitor", rank:1, color:"#D98E31"};
+}
+function mitigationText(c, s){
+  let extra = "";
+  if((c.id==="prod_budget" || c.id==="cap_util" || c.id==="oee") && s.breakdownByReason){
+    const reasons = Object.entries(s.breakdownByReason).sort((a,b)=>b[1].totalDowntime-a[1].totalDowntime);
+    if(reasons.length){
+      const [name, data] = reasons[0];
+      extra = " The largest linked downtime driver this month is \""+name+"\" ("+fmt(data.totalDowntime)+" min across "+data.count+" occurrence"+(data.count>1?"s":"")+") â€” closing that first will move this KPI fastest.";
+    }
+  }
+  const action = SHORT_ACTION[c.id] || "Review with the line owner and agree a recovery step.";
+  return (c.shortfallMsg ? c.shortfallMsg+" " : "") + action + extra;
+}
+function renderMitigationPlan(computed, s, remainingDays){
+  document.getElementById("mpTitle").textContent = "Mitigation Plan â€” Day "+s.today;
+
+  const scored = computed.filter(c=>c.tgt && !c.notFound).map(c=>{
+    const status = paceLabel(c.pacePct);
+    const impact = KPI_IMPACT[c.id] || "Medium";
+    return {...c, status, impact, priority: priorityFor(status, impact)};
+  }).sort((a,b)=>b.priority.rank-a.priority.rank);
+
+  const counts = {behind:0, watch:0, onpace:0};
+  scored.forEach(c=>{
+    if(c.status==="BEHIND") counts.behind++;
+    else if(c.status==="WATCH") counts.watch++;
+    else if(c.status==="ON PACE") counts.onpace++;
+  });
+  document.getElementById("mpSummaryStrip").innerHTML =
+    `<span class="badge" style="background:#C6423F1A;color:#C6423F;padding:8px 14px;font-size:12.5px;">${counts.behind} behind pace</span>`+
+    `<span class="badge" style="background:#D98E311A;color:#D98E31;padding:8px 14px;font-size:12.5px;">${counts.watch} at watch</span>`+
+    `<span class="badge" style="background:#0F6E6A1A;color:#0F6E6A;padding:8px 14px;font-size:12.5px;">${counts.onpace} on pace</span>`+
+    `<span class="badge" style="background:#EEF2F6;color:#5B6B7E;padding:8px 14px;font-size:12.5px;">${remainingDays} day${remainingDays===1?'':'s'} left in month</span>`;
+
+  const needsAction = scored.filter(c=>c.status==="BEHIND" || c.status==="WATCH");
+  document.getElementById("mpSub").textContent = needsAction.length
+    ? needsAction.length+" KPI"+(needsAction.length>1?"s":"")+" need attention, ranked by priority"
+    : "Everything is on pace â€” no action items today.";
+  document.getElementById("mitigationList").innerHTML = needsAction.length ? needsAction.map(c=>`
+    <div class="comment-row">
+      <div class="comment-dot" style="background:${c.priority.color};"></div>
+      <div><span class="comment-kpi">${c.label} â€” <span style="color:${c.priority.color};">${c.priority.label}</span>: </span>
+      <span class="comment-text">${mitigationText(c, s)}</span></div>
+    </div>`).join("") : `<div style="padding:10px 4px;color:var(--soft);font-size:13px;">No KPIs below pace today. Keep monitoring.</div>`;
+}
+
+// ---- rendering ----
+function renderSbuMenu(){
+  const menu = document.getElementById("sbuMenu");
+  menu.innerHTML = SBUS.map(s=>`<div class="sbu-item ${s===currentSbu?'active':''}" data-sbu="${s}">${s}</div>`).join("");
+  menu.querySelectorAll(".sbu-item").forEach(el=>{
+    el.addEventListener("click", async ()=>{
+      currentSbu = el.dataset.sbu;
+      draft = {};
+      document.getElementById("sbuBtn").textContent = currentSbu+" \u25be";
+      menu.classList.remove("open");
+      await applySupplement(currentSbu);
+      renderAll();
+    });
+  });
+}
+
+function renderMonthMenu(){
+  const menu = document.getElementById("monthMenu");
+  const m = DWH_DATA.meta;
+  const label = m.monthName + " " + m.year;
+  menu.innerHTML = `<div class="sbu-item active">${label}</div>`;
+  document.getElementById("monthBtn").textContent = label + " \u25be";
+}
+
+function renderSettingsGrid(){
+  const s = state[currentSbu];
+  const grid = document.getElementById("settingsGrid");
+  const metrics = getMetricsList(s);
+  let html = metrics.map(m=>`
+    <label>${m.label} (${m.unit})
+      <input type="number" class="tgt-input" data-id="${m.id}" value="${s.targets[m.id] ?? ''}" />
+    </label>`).join("");
+  html += `<label>Total days in month<input type="number" id="tdInput" value="${s.totalDays}" /></label>`;
+  html += `<label>Current day<input type="number" id="dyInput" value="${s.today}" /></label>`;
+  grid.innerHTML = html;
+}
+
+function renderAll(){
+  const s = state[currentSbu];
+  const computed = computeMetrics(s);
+  const ranked = computed.filter(c=>c.tgt && !c.notFound);
+  const remainingDays = Math.max(s.totalDays - s.today, 0);
+
+  document.getElementById("dayInput").value = s.today;
+  document.getElementById("dayOfLabel").textContent = "/ "+s.totalDays;
+  document.getElementById("tableTitle").textContent = "KPI Pacing â€” "+currentSbu;
+  document.getElementById("commentsTitle").textContent = "Daily Comments â€” Day "+s.today;
+  document.getElementById("footerNote").textContent = "Live figures for Day "+s.today+" of "+currentSbu+" (from MCP DWH).";
+  document.getElementById("paceChartSub").textContent = "100% line = on target for Day "+s.today;
+
+  // Kaizen card (to-date count, from Supabase).
+  const kaizenMetric = computed.find(c=>c.id==="kaizen");
+  if(!kaizenMetric){
+    document.getElementById("kaizenVal").textContent = "\u2014";
+    document.getElementById("kaizenSub").textContent = "No Kaizen data";
+    document.getElementById("kaizenCompare").textContent = "";
+  } else {
+    const kVal = kaizenMetric.cumulativeActual;
+    const kExpected = kaizenMetric.expectedToDate;
+    const kTgt = kaizenMetric.tgt;
+    const kEl = document.getElementById("kaizenVal");
+    kEl.textContent = (kVal!==null && kVal!==undefined) ? fmt(kVal)+" nos" : "\u2014";
+    let sub = kTgt!==null && kTgt!==undefined ? "target "+fmt(kTgt)+" nos" : "no target";
+    if(kExpected!==null && kExpected!==undefined) sub += " \u00b7 expected-to-date "+fmt(kExpected);
+    document.getElementById("kaizenSub").textContent = sub;
+    const kcEl = document.getElementById("kaizenCompare");
+    if(kVal===null || kVal===undefined || kExpected===null || kExpected===undefined){
+      kcEl.textContent = "";
+    } else {
+      const diff = kVal - kExpected;
+      const favorable = diff >= 0;
+      const sign = diff>0 ? "+" : (diff<0 ? "\u2212" : "\u00b1");
+      kcEl.textContent = sign + fmt(Math.abs(diff)) + " nos \u00b7 " + (favorable ? "above target" : "below target");
+      kcEl.style.background = favorable ? "#0F6E6A1A" : "#C6423F1A";
+      kcEl.style.color = favorable ? "#0F6E6A" : "#C6423F";
+    }
+  }
+
+  const byId = Object.fromEntries(computed.map(c=>[c.id,c]));
+  const setActualCard = (valId, subId, compareId, metric, isLevel)=>{
+    if(!metric || metric.notFound){
+      document.getElementById(valId).style.color = "#C6423F";
+      document.getElementById(valId).style.fontSize = "13px";
+      document.getElementById(valId).textContent = NOT_FOUND;
+      document.getElementById(subId).textContent = "Not available in MCP DWH";
+      if(compareId) document.getElementById(compareId).textContent = "";
+      return;
+    }
+    const val = isLevel ? metric.cumulativeActual : metric.todayActual;
+    document.getElementById(valId).textContent = (val!==null && val!==undefined) ? fmt(val)+" "+metric.unit : "\u2014";
+    const target = isLevel ? metric.tgt : metric.dailyTarget;
+    const dt = target!==null ? fmt(target)+" "+metric.unit : "\u2014";
+    document.getElementById(subId).textContent = isLevel
+      ? "avg of "+(metric.daysLogged||0)+" days vs target "+dt
+      : "vs today's target "+dt;
+
+    if(compareId){
+      const cEl = document.getElementById(compareId);
+      if(val===null || val===undefined || target===null || target===undefined){
+        cEl.textContent = "";
+      } else {
+        const diff = val - target;
+        const lowerBetter = !!LOWER_IS_BETTER[metric.id];
+        const favorable = lowerBetter ? diff<=0 : diff>=0;
+        const sign = diff>0 ? "+" : (diff<0 ? "\u2212" : "\u00b1");
+        const diffTxt = sign + fmt(Math.abs(diff)) + " " + metric.unit;
+        let statusTxt;
+        if(Math.abs(diff) < 0.05) statusTxt = "on target";
+        else statusTxt = favorable ? (lowerBetter ? "under target" : "above target") : (lowerBetter ? "over target" : "below target");
+        cEl.textContent = diffTxt + " \u00b7 " + statusTxt;
+        cEl.style.background = favorable ? "#0F6E6A1A" : "#C6423F1A";
+        cEl.style.color = favorable ? "#0F6E6A" : "#C6423F";
+      }
+    }
+  };
+  setActualCard("prodActualVal","prodActualSub","prodActualCompare", byId["prod_budget"], false);
+  setActualCard("capActualVal","capActualSub","capActualCompare", byId["cap_util"], true);
+  setActualCard("oeeActualVal","oeeActualSub","oeeActualCompare", byId["oee"], true);
+  setActualCard("s5Val","s5Sub","s5Compare", byId["5s_score"], true);
+  setActualCard("wasteActualVal","wasteActualSub","wasteActualCompare", byId["waste"], true);
+
+  const tbody = document.getElementById("tableBody");
+  tbody.innerHTML = computed.map(c=>{
+    if(c.notFound){
+      return `<tr class="rowline">
+        <td style="font-weight:600;">${c.label}</td>
+        <td colspan="7"><span class="nf">${NOT_FOUND}</span></td>
+      </tr>`;
+    }
+    const color = paceColor(c.pacePct);
+    const width = c.pacePct===null ? 0 : Math.min(c.pacePct,130)/1.3;
+    const monthlyTgtDisplay = PER_DAY_TARGET_METRICS[c.id] ? null : c.tgt;
+    const tgtCell = monthlyTgtDisplay!==null && monthlyTgtDisplay!==undefined
+      ? `<span class="mono">${fmt(monthlyTgtDisplay)} ${c.unit}</span>`
+      : (SUPABASE_METRICS[c.id] ? `<span style="color:#5B6B7E;">No target</span>` : `<span class="nf">${NOT_FOUND}</span>`);
+    const statusBadge = c.tgt
+      ? `<span class="badge" style="background:${color+'1A'};color:${color};">${paceLabel(c.pacePct)}</span>`
+      : `<span class="badge" style="background:#EEF2F6;color:#5B6B7E;">NO TARGET</span>`;
+    return `<tr class="rowline">
+      <td style="font-weight:600;">${c.label}</td>
+      <td>${tgtCell}</td>
+      <td class="mono" style="color:var(--soft);">${c.dailyTarget!==null ? fmt(c.dailyTarget)+" "+c.unit : "\u2014"}</td>
+      <td><input type="number" placeholder="enter" class="kpi-input" data-id="${c.id}"
+            value="${draft[c.id] ?? ((s.dayLog[s.today] && s.dayLog[s.today][c.id]!==undefined) ? s.dayLog[s.today][c.id] : '')}" /></td>
+      <td class="mono" style="font-weight:600;">${c.cumulativeActual!==null ? fmt(c.cumulativeActual)+" "+c.unit : "\u2014"}</td>
+      <td class="mono" style="color:var(--soft);">${c.expectedToDate!==null ? fmt(c.expectedToDate)+" "+c.unit : "\u2014"}</td>
+      <td>
+        <div class="pace-bar-wrap">
+          <div class="pace-bar-fill" style="width:${width}%;background:${color};"></div>
+          <div class="pace-marker" style="left:${100/1.3}%;"></div>
+          <div class="pace-pct-label">${c.pacePct===null?'':fmt(c.pacePct)+'%'}</div>
+        </div>
+      </td>
+      <td>${statusBadge}</td>
+    </tr>`;
+  }).join("");
+  tbody.querySelectorAll(".kpi-input").forEach(inp=>{
+    inp.addEventListener("input", e=>{ draft[e.target.dataset.id] = e.target.value; });
+  });
+
+  const feed = document.getElementById("commentsFeed");
+  const sorted = [...computed].sort((a,b)=>(a.pacePct??-1)-(b.pacePct??-1));
+  feed.innerHTML = sorted.map(c=>`
+    <div class="comment-row">
+      <div class="comment-dot" style="background:${c.notFound ? '#C6423F' : paceColor(c.pacePct)};"></div>
+      <div><span class="comment-kpi">${c.label}: </span><span class="comment-text">${c.shortfallMsg}</span></div>
+    </div>`).join("");
+
+  renderCharts(ranked, s);
+  renderBreakdownSection(s);
+  renderMitigationPlan(computed, s, remainingDays);
+}
+
+function renderCharts(ranked, s){
+  const paceCtx = document.getElementById("paceChart").getContext("2d");
+  const paceData = {
+    labels: ranked.map(r=>r.label),
+    datasets: [{
+      data: ranked.map(r=>Math.round(r.pacePct)),
+      backgroundColor: ranked.map((r,i)=>VIVID[i%VIVID.length]),
+      borderRadius: 6,
+      barThickness: 18,
+    }]
+  };
+  if(paceChart) paceChart.destroy();
+  paceChart = new Chart(paceCtx, {
+    type: "bar",
+    data: paceData,
+    options: {
+      indexAxis: "y",
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display:false },
+        tooltip: { callbacks: { label: c=>c.parsed.x+"% of pace" } },
+      },
+      scales: {
+        x: { grid:{color:"#EEF2F6"}, ticks:{font:{size:11},color:"#5B6B7E"} },
+        y: { grid:{display:false}, ticks:{font:{size:11.5},color:"#0B1220"} },
+      },
+    },
+    plugins: [{
+      id: "targetLine",
+      afterDraw(chart){
+        const {ctx, scales:{x,y}} = chart;
+        const xPos = x.getPixelForValue(100);
+        ctx.save();
+        ctx.strokeStyle = "#0B1220";
+        ctx.setLineDash([5,4]);
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(xPos, y.top);
+        ctx.lineTo(xPos, y.bottom);
+        ctx.stroke();
+        ctx.restore();
+      }
+    }]
+  });
+
+  const trend = buildTrend(s, "prod_budget");
+  const trendCtx = document.getElementById("trendChart").getContext("2d");
+  const gradient = trendCtx.createLinearGradient(0,0,0,280);
+  gradient.addColorStop(0, "rgba(124,58,237,0.35)");
+  gradient.addColorStop(1, "rgba(124,58,237,0.02)");
+  if(trendChart) trendChart.destroy();
+  trendChart = new Chart(trendCtx, {
+    type: "line",
+    data: {
+      labels: trend.days,
+      datasets: [
+        { label:"Expected pace", data:trend.expected, borderColor:"#EA580C", borderDash:[6,4], borderWidth:2, pointRadius:0, tension:.25 },
+        { label:"Actual", data:trend.actual, borderColor:"#7C3AED", backgroundColor:gradient, borderWidth:3, pointRadius:2.5, pointBackgroundColor:"#7C3AED", tension:.25, fill:true },
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { position:"top", labels:{font:{size:11.5}, boxWidth:14} },
+        tooltip: { callbacks: { label: c=>c.dataset.label+": "+fmt(c.parsed.y) } },
+      },
+      scales: {
+        x: { grid:{display:false}, ticks:{font:{size:11},color:"#5B6B7E"} },
+        y: { grid:{color:"#EEF2F6"}, ticks:{font:{size:11},color:"#5B6B7E"} },
+      },
+    }
+  });
+}
+
+// ---- events ----
+document.getElementById("sbuBtn").addEventListener("click", ()=>{
+  document.getElementById("sbuMenu").classList.toggle("open");
+  document.getElementById("monthMenu").classList.remove("open");
+});
+document.getElementById("monthBtn").addEventListener("click", ()=>{
+  document.getElementById("monthMenu").classList.toggle("open");
+  document.getElementById("sbuMenu").classList.remove("open");
+});
+document.addEventListener("click", e=>{
+  if(!e.target.closest("#sbuBtn") && !e.target.closest("#sbuMenu")) document.getElementById("sbuMenu").classList.remove("open");
+  if(!e.target.closest("#monthBtn") && !e.target.closest("#monthMenu")) document.getElementById("monthMenu").classList.remove("open");
+});
+document.getElementById("dayInput").addEventListener("change", e=>{
+  const s = state[currentSbu];
+  let v = Math.max(1, Math.min(s.totalDays, Number(e.target.value)||1));
+  s.today = v;
+  draft = {};
+  renderAll();
+});
+document.getElementById("settingsBtn").addEventListener("click", ()=>{
+  renderSettingsGrid();
+  document.getElementById("settingsPanel").classList.toggle("open");
+});
+document.getElementById("cancelSettingsBtn").addEventListener("click", ()=>{
+  document.getElementById("settingsPanel").classList.remove("open");
+});
+document.getElementById("saveSettingsBtn").addEventListener("click", ()=>{
+  const s = state[currentSbu];
+  document.querySelectorAll(".tgt-input").forEach(inp=>{
+    const id = inp.dataset.id;
+    s.targets[id] = inp.value==="" ? null : Number(inp.value);
+  });
+  s.totalDays = Number(document.getElementById("tdInput").value)||31;
+  s.today = Number(document.getElementById("dyInput").value)||1;
+  document.getElementById("settingsPanel").classList.remove("open");
+  renderAll();
+});
+document.getElementById("saveDayBtn").addEventListener("click", ()=>{
+  const s = state[currentSbu];
+  s.dayLog[s.today] = { ...(s.dayLog[s.today]||{}), ...draft };
+  draft = {};
+  renderAll();
+});
+document.getElementById("downloadBtn").addEventListener("click", ()=>{
+  const serialized = JSON.stringify(DWH_DATA).replace(/<\//g, "<\\/");
+  const html = ("<!DOCTYPE html>\n"+document.documentElement.outerHTML).replace("let DWH_DATA = null;", "const DWH_DATA = "+serialized+";");
+  const blob = new Blob([html], {type:"text/html"});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "sbu_pacing_dashboard_dwh_"+currentSbu.replace(" ","")+".html";
+  a.click();
+  URL.revokeObjectURL(url);
+});
+
+// ---- global safety net ----
+function showFatalError(msg){
+  const lb = document.getElementById("loadingBanner");
+  if(lb) lb.style.display = "none";
+  const eb = document.getElementById("errorBanner");
+  if(eb){ eb.style.display = "block"; eb.textContent = "Dashboard error: " + msg; }
+}
+window.addEventListener("error", e=>{ showFatalError(e.message || String(e.error || e)); });
+window.addEventListener("unhandledrejection", e=>{ showFatalError((e.reason && e.reason.message) || String(e.reason)); });
+
+// ---- boot ----
+(async function boot(){
+  try{
+    DWH_DATA = await fetch("/api/dwh").then(async r => { if (!r.ok) throw new Error("API " + r.status); return r.json(); });
+    const sbuList = DWH_DATA.sbus || [];
+    if(sbuList.length===0){ throw new Error("No SBU data found in the DWH snapshot."); }
+    SBUS = sbuList.map(s=>s.display);
+    sbuList.forEach(sbuData => { state[sbuData.display] = buildState(sbuData); });
+    currentSbu = SBUS[0];
+    document.getElementById("sbuBtn").textContent = currentSbu+" \u25be";
+    renderSbuMenu();
+    renderMonthMenu();
+    const fm = document.getElementById("footerMonth");
+    if (fm) fm.textContent = DWH_DATA.meta.monthName + " " + DWH_DATA.meta.year;
+    await applySupplement(currentSbu);
+    renderAll();
+    document.getElementById("loadingBanner").style.display = "none";
+    document.getElementById("dashboardBody").style.display = "block";
+  }catch(err){
+    console.error(err);
+    document.getElementById("loadingBanner").style.display = "none";
+    const eb = document.getElementById("errorBanner");
+    eb.style.display = "block";
+    eb.textContent = "Couldn't load data from MCP DWH: " + (err.message || err);
+  }
+})();
+</script>
+</body>
+</html>
