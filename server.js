@@ -267,10 +267,31 @@ async function loadSnapshot(meta) {
 const app = express();
 app.use(express.static(path.join(__dirname, "public")));
 
+const PROXY_URL = (process.env.DATA_PROXY_URL || "").trim().replace(/\/+$/, "");
+
+async function proxyJson(pathAndQuery) {
+  const r = await fetch(`${PROXY_URL}${pathAndQuery}`, {
+    signal: AbortSignal.timeout(60000),
+    headers: { "Cache-Control": "no-cache" },
+  });
+  const data = await r.json().catch(() => null);
+  return { status: r.status, data };
+}
+
 let cache = { key: null, value: null, at: 0 };
 const TTL_MS = 15000;
 
 app.get("/api/dwh", async (req, res) => {
+  if (PROXY_URL) {
+    try {
+      const qs = new URLSearchParams(req.query).toString();
+      const { status, data } = await proxyJson(`/api/dwh${qs ? "?" + qs : ""}`);
+      res.setHeader("Cache-Control", "no-store");
+      return res.status(status).json(data);
+    } catch (err) {
+      return res.status(502).json({ error: "Data proxy unavailable: " + String(err && err.message ? err.message : err) });
+    }
+  }
   const meta = resolveMonth(req.query);
   const force = req.query.refresh === "1";
   const key = JSON.stringify(meta);
@@ -292,6 +313,15 @@ let monthsCache = { value: null, at: 0 };
 const MONTHS_TTL_MS = 3600000;
 
 app.get("/api/months", async (req, res) => {
+  if (PROXY_URL) {
+    try {
+      const { status, data } = await proxyJson("/api/months");
+      res.setHeader("Cache-Control", "no-store");
+      return res.status(status).json(data);
+    } catch (err) {
+      return res.status(502).json({ error: "Data proxy unavailable: " + String(err && err.message ? err.message : err) });
+    }
+  }
   const now = Date.now();
   if (monthsCache.value && now - monthsCache.at < MONTHS_TTL_MS) {
     return res.json(monthsCache.value);
