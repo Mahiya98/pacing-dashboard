@@ -330,6 +330,23 @@ const PER_DAY_TARGET_METRICS = { "ot": true };
 const DWH_NOT_FOUND = { kaizen_savings:true, OT:true };
 // KPIs read live from Supabase instead of DWH.
 const SUPABASE_METRICS = { kaizen:true, qcp_audit:true, "5s_score":true };
+// Maps Supabase ACCL_KPI_TARGET.kpi_id -> dashboard metric id (targets come from Supabase).
+const SUPABASE_KPI_TARGET_MAP = {
+  "5s_score": "5s_score",
+  "cap_util": "cap_util",
+  "kaizen": "kaizen",
+  "kaizen_savings": "kaizen_savings",
+  "manpower": "manpower",
+  "oee": "oee",
+  "ot": "ot",
+  "OT cost": "OT",
+  "prod_budget": "prod_budget",
+  "project": "project",
+  "qcp_audit": "qcp_audit",
+  "training": "training",
+  "waste": "waste",
+  "Yeild": "Yeild",
+};
 
 // Display units (DWH raw values; set here for presentation only).
 const UNITS = {
@@ -397,10 +414,11 @@ async function loadSupabaseSupplement(displaySbu){
   ]);
   const targets = {};
   (tgtData||[]).forEach(r=>{
-    if(!SUPABASE_METRICS[r.kpi_id]) return;
+    const metricId = SUPABASE_KPI_TARGET_MAP[r.kpi_id];
+    if(!metricId) return;
     const raw = (r.monthly_target===null||r.monthly_target===undefined) ? null : String(r.monthly_target).replace(/,/g,"").trim();
     const val = (raw===null||raw==="") ? null : Number(raw);
-    targets[r.kpi_id] = (val===null||isNaN(val)) ? null : val;
+    targets[metricId] = (val===null||isNaN(val)) ? null : val;
   });
   const daily = {};
   for(let d=1; d<=31; d++) daily[d] = {};
