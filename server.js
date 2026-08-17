@@ -1,5 +1,4 @@
 import express from "express";
-import sql from "mssql";
 import path from "path";
 import os from "os";
 import { fileURLToPath } from "url";
@@ -7,17 +6,9 @@ import { fileURLToPath } from "url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 try { process.loadEnvFile(path.join(__dirname, ".env")); } catch {}
 
-const DB_CONFIG = {
-  server: process.env.DWH_SERVER || "203.202.241.211",
-  port: Number(process.env.DWH_PORT) || 1433,
-  user: process.env.DWH_USER || "mcp_user",
-  password: process.env.DWH_PASSWORD || "",
-  database: process.env.DWH_DATABASE || "DWH",
-  options: { encrypt: false, trustServerCertificate: false },
-  pool: { max: 10, min: 0, idleTimeoutMillis: 30000 },
-};
+const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZwd2JjdXh3eGtxdmF1ZmZxb29qIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM4MjA4NjEsImV4cCI6MjA5OTM5Njg2MX0.iAoIZXl-2G7h3wm4jcYsEs6-wdN-YKTS-KbBteBBzUk";
 
-const BUS = [
+const SUPABASE_PROJECT_REF = "pacing-dashboard";
   { display: "AEFML", dwhSbu: "AEL", dwhBuId: 144 },
   { display: "AAFL", dwhSbu: "AAFL", dwhBuId: 232 },
   { display: "FAL", dwhSbu: "FAL", dwhBuId: 189 },
@@ -271,75 +262,113 @@ const app = express();
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
-const PROXY_URL = (process.env.DATA_PROXY_URL || "").trim().replace(/\/+$/, "");
+const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZwd2JjdXh3eGtxdmF1ZmZxb29qIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM4MjA4NjEsImV4cCI6MjA5OTM5Njg2MX0.iAoIZXl-2G7h3wm4jcYsEs6-wdN-YKTS-KbBteBBzUk";
 
-async function proxyJson(pathAndQuery) {
-  const r = await fetch(`${PROXY_URL}${pathAndQuery}`, {
-    signal: AbortSignal.timeout(60000),
-    headers: { "Cache-Control": "no-cache" },
+const SUPABASE_PROJECT_REF = "pacing-dashboard";
+
+async function supabaseFetch(pathAndQuery) {
+  const res = await fetch(`https://${SUPABASE_PROJECT_REF}.supabase.co/rest/v1${pathAndQuery}`, {
+    headers: { Authorization: `Bearer ${SUPABASE_ANON_KEY}`, "apikey": SUPABASE_ANON_KEY },
   });
-  const data = await r.json().catch(() => null);
-  return { status: r.status, data };
+  const data = await res.json().catch(() => null);
+  return { status: res.status, data };
 }
 
-let cache = { key: null, value: null, at: 0 };
-const TTL_MS = 15000;
-
-let monthsCache = { value: null, at: 0 };
-const MONTHS_TTL_MS = 3600000;
-
-async function getMonthsData() {
-  if (PROXY_URL) {
-    const { status, data } = await proxyJson("/api/months");
-    if (status !== 200) throw new Error("proxy months failed (HTTP " + status + ")");
-    return data;
+async function supabaseMonthsData() {
+  const { data } = await supabaseFetch("/ACCL_KPI_TARGET?select=month,year");
+  if (!data || data.length === 0) throw new Error("Supabase months query failed");
+  const byMonth = {};
+  for (const r of data) {
+    const key = `${r.year}-${String(r.month).padStart(2, "0")}`;
+    if (!byMonth[key]) byMonth[key] = { year: r.year, month: r.month, monthName: MONTHS[r.month - 1] };
   }
-  const now = Date.now();
-  if (monthsCache.value && now - monthsCache.at < MONTHS_TTL_MS) return monthsCache.value;
-  const pool = await sql.connect(DB_CONFIG);
-  try {
-    const rows = (await pool.request().query(`
-      SELECT DISTINCT YEAR(dteProductionDate) y, MONTH(dteProductionDate) m
-      FROM mes.tblOeeProdWasteHeaderArc
-      ORDER BY y DESC, m DESC`)).recordset;
-    const months = rows.map(r => ({ year: Number(r.y), month: Number(r.m) }));
-    monthsCache = { value: months, at: Date.now() };
-    return months;
-  } finally {
-    await pool.close();
-  }
+  return Object.values(byMonth);
 }
 
-async function getSnapshotData(meta) {
-  if (PROXY_URL) {
-    const qs = new URLSearchParams({ month: `${meta.year}-${String(meta.month).padStart(2, "0")}` }).toString();
-    const { status, data } = await proxyJson(`/api/dwh?${qs}`);
-    if (status !== 200) throw new Error("proxy snapshot failed (HTTP " + status + ")");
-    return data;
+async function supabaseSnapshotData(meta) {
+  const monthKey = `${meta.year}-${String(meta.month).padStart(2, "0")}`;
+  const { data } = await supabaseFetch(`/ACCL_KPI_TARGET?month=eq.${monthKey}&sbu=not.is.null`);
+  if (!data || data.length === 0) throw new Error("Supabase snapshot query failed for " + monthKey);
+  return buildSnapshotFromSupabase(data, meta);
+}
+
+function buildSnapshotFromSupabase(rows, meta) {
+  const idx = Object.fromEntries(BUS.map((b, i) => [b.dwhBuId, i]));
+  const sbus = BUS.map(b => ({
+    display: b.display,
+    dwhSbu: b.dwhSbu,
+    dwhBuId: b.dwhBuId,
+    today: meta.today,
+    targets: {},
+    dayLog: {},
+    breakdownByDay: {},
+    breakdownByReason: {},
+    totalDowntime: 0,
+  }));
+
+  // KPI targets from Supabase ACCL_KPI_TARGET
+  const tgtBySbu = {};
+  for (const r of rows) {
+    const buId = Number(r.intBusinessUnitId);
+    const name = (r.strKPIs || "").toLowerCase();
+    const val = Number(r.numTarget);
+    if (!Number.isFinite(val)) continue;
+    const map = tgtBySbu[buId] || (tgtBySbu[buId] = {});
+    map[name] = val;
   }
-  return loadSnapshot(meta);
+  for (const buIdStr of Object.keys(tgtBySbu)) {
+    const i = idx[Number(buIdStr)];
+    if (i !== undefined) {
+      const map = tgtBySbu[buIdStr];
+      const t = {};
+      for (const rule of TARGET_RULES) {
+        if (rule.ordered) {
+          for (const p of rule.patterns) {
+            const matched = Object.keys(map).filter(n => n.includes(p));
+            if (matched.length) {
+              t[rule.id] = Math.min(...matched.map(n => map[n]));
+              break;
+            }
+          }
+        } else {
+          let best;
+          for (const n of Object.keys(map)) {
+            if (rule.patterns.some(p => n.includes(p)) && (best === undefined || map[n] < best)) {
+              best = map[n];
+            }
+          }
+          if (best !== undefined) t[rule.id] = best;
+        }
+      }
+      sbus[i].targets = t;
+    }
+  }
+
+  return {
+    meta: {
+      generated: new Date().toISOString().replace("T", " ").slice(0, 19),
+      year: meta.year,
+      month: meta.month,
+      monthName: meta.monthName,
+      totalDays: meta.totalDays,
+    },
+    sbus,
+  };
 }
 
 app.get("/api/months", async (req, res) => {
   try {
     res.setHeader("Cache-Control", "no-store");
-    res.json(await getMonthsData());
+    res.json(await supabaseMonthsData());
   } catch (err) {
     res.status(502).json({ error: String(err && err.message ? err.message : err) });
   }
 });
 
 app.get("/api/dwh", async (req, res) => {
-  const meta = resolveMonth(req.query);
-  const force = req.query.refresh === "1";
-  const key = JSON.stringify(meta);
-  const now = Date.now();
-  if (!force && !PROXY_URL && cache.key === key && now - cache.at < TTL_MS) {
-    return res.json(cache.value);
-  }
   try {
-    const snapshot = await getSnapshotData(meta);
-    if (!PROXY_URL) cache = { key, value: snapshot, at: Date.now() };
+    const meta = resolveMonth(req.query);
+    const snapshot = await supabaseSnapshotData(meta);
     res.setHeader("Cache-Control", "no-store");
     res.json(snapshot);
   } catch (err) {
@@ -424,7 +453,7 @@ async function callMcpTool(name, args) {
         oee: Number(r.oee_target),
         Yeild: Number(r.Yeild_target),
         waste: Number(r.waste_target),
-        "5s_score": Number(r."5s_score_target"),
+        "5s_score": Number(r[\"5s_score_target\"]),
         kaizen: Number(r.kaizen_target),
         kaizen_savings: Number(r.kaizen_savings_target),
         training: Number(r.training_target),
