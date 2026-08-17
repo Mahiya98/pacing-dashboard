@@ -297,7 +297,7 @@ async function callMcpTool(name, args) {
         oee: Number(r.oee_target),
         Yeild: Number(r.Yeild_target),
         waste: Number(r.waste_target),
-        "5s_score": Number(r[\"5s_score_target\"]),
+        "5s_score": Number(r["5s_score_target"]),
         kaizen: Number(r.kaizen_target),
         kaizen_savings: Number(r.kaizen_savings_target),
         training: Number(r.training_target),
