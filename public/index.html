@@ -444,6 +444,8 @@ let SBUS = [];
 let currentSbu = null;
 let draft = {};
 let paceChart, trendChart;
+let MONTHS = [];          // [{year, month}] available months (desc)
+let currentMonthKey = null; // "YYYY-MM" currently selected
 
 // ---- build state from the embedded DWH snapshot ----
 function buildState(sbuData){
@@ -750,12 +752,36 @@ function renderSbuMenu(){
   });
 }
 
+const MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+function monthKey(y, m){ return `${y}-${String(m).padStart(2,"0")}`; }
+function monthLabel(y, m){ return `${MONTH_NAMES[m-1]} ${y}`; }
+
 function renderMonthMenu(){
   const menu = document.getElementById("monthMenu");
   const m = DWH_DATA.meta;
   const label = m.monthName + " " + m.year;
-  menu.innerHTML = `<div class="sbu-item active">${label}</div>`;
   document.getElementById("monthBtn").textContent = label + " \u25be";
+  let list = MONTHS;
+  if(!list.length){
+    const now = new Date();
+    list = [];
+    for(let i=0;i<13;i++){
+      const d = new Date(now.getFullYear(), now.getMonth()-i, 1);
+      list.push({ year: d.getFullYear(), month: d.getMonth()+1 });
+    }
+  }
+  menu.innerHTML = list.map(({year, month})=>{
+    const key = monthKey(year, month);
+    return `<div class="sbu-item ${key===currentMonthKey?'active':''}" data-mkey="${key}">${monthLabel(year, month)}</div>`;
+  }).join("");
+  menu.querySelectorAll(".sbu-item").forEach(el=>{
+    el.addEventListener("click", async ()=>{
+      const key = el.dataset.mkey;
+      menu.classList.remove("open");
+      if(key === currentMonthKey) return;
+      await loadMonth(key);
+    });
+  });
 }
 
 function renderSettingsGrid(){
@@ -1050,14 +1076,23 @@ window.addEventListener("error", e=>{ showFatalError(e.message || String(e.error
 window.addEventListener("unhandledrejection", e=>{ showFatalError((e.reason && e.reason.message) || String(e.reason)); });
 
 // ---- boot ----
-(async function boot(){
+async function loadMonth(key){
+  const loading = document.getElementById("loadingBanner");
+  const eb = document.getElementById("errorBanner");
+  loading.style.display = "block";
+  loading.textContent = "Loading data from MCP DWH + Supabase\u2026";
+  eb.style.display = "none";
   try{
-    DWH_DATA = await fetch("/api/dwh").then(async r => { if (!r.ok) throw new Error("API " + r.status); return r.json(); });
+    const qs = key ? `?month=${encodeURIComponent(key)}` : "";
+    DWH_DATA = await fetch("/api/dwh"+qs).then(async r => { if (!r.ok) throw new Error("API " + r.status); return r.json(); });
     const sbuList = DWH_DATA.sbus || [];
     if(sbuList.length===0){ throw new Error("No SBU data found in the DWH snapshot."); }
     SBUS = sbuList.map(s=>s.display);
+    state = {};
     sbuList.forEach(sbuData => { state[sbuData.display] = buildState(sbuData); });
     currentSbu = SBUS[0];
+    currentMonthKey = monthKey(DWH_DATA.meta.year, DWH_DATA.meta.month);
+    draft = {};
     document.getElementById("sbuBtn").textContent = currentSbu+" \u25be";
     renderSbuMenu();
     renderMonthMenu();
@@ -1065,15 +1100,25 @@ window.addEventListener("unhandledrejection", e=>{ showFatalError((e.reason && e
     if (fm) fm.textContent = DWH_DATA.meta.monthName + " " + DWH_DATA.meta.year;
     await applySupplement(currentSbu);
     renderAll();
-    document.getElementById("loadingBanner").style.display = "none";
+    loading.style.display = "none";
     document.getElementById("dashboardBody").style.display = "block";
   }catch(err){
     console.error(err);
-    document.getElementById("loadingBanner").style.display = "none";
-    const eb = document.getElementById("errorBanner");
+    loading.style.display = "none";
     eb.style.display = "block";
     eb.textContent = "Couldn't load data from MCP DWH: " + (err.message || err);
   }
+}
+
+(async function boot(){
+  try{
+    const mr = await fetch("/api/months");
+    if(mr.ok){
+      const ml = await mr.json();
+      MONTHS = (ml||[]).map(x=>({ year: Number(x.year), month: Number(x.month) }));
+    }
+  }catch(e){ console.warn("Month list unavailable:", e); }
+  await loadMonth(null);
 })();
 </script>
 </body>

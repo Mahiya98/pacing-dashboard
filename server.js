@@ -288,6 +288,33 @@ app.get("/api/dwh", async (req, res) => {
   }
 });
 
+let monthsCache = { value: null, at: 0 };
+const MONTHS_TTL_MS = 3600000;
+
+app.get("/api/months", async (req, res) => {
+  const now = Date.now();
+  if (monthsCache.value && now - monthsCache.at < MONTHS_TTL_MS) {
+    return res.json(monthsCache.value);
+  }
+  try {
+    const pool = await sql.connect(DB_CONFIG);
+    try {
+      const rows = (await pool.request().query(`
+        SELECT DISTINCT YEAR(dteProductionDate) y, MONTH(dteProductionDate) m
+        FROM mes.tblOeeProdWasteHeaderArc
+        ORDER BY y DESC, m DESC`)).recordset;
+      const months = rows.map(r => ({ year: Number(r.y), month: Number(r.m) }));
+      monthsCache = { value: months, at: Date.now() };
+      res.setHeader("Cache-Control", "no-store");
+      res.json(months);
+    } finally {
+      await pool.close();
+    }
+  } catch (err) {
+    res.status(500).json({ error: String(err && err.message ? err.message : err) });
+  }
+});
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, "0.0.0.0", () => {
   const nets = os.networkInterfaces();
