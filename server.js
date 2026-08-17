@@ -191,171 +191,11 @@ function buildSnapshot(meta, rows) {
   };
 }
 
-async function loadSnapshot(meta) {
-  const inClause = BUS.map(b => b.dwhBuId).join(",");
-  const pool = await sql.connect(DB_CONFIG);
-  try {
-    const req = pool.request();
-    const prod = (await req.query(`
-      SELECT intBusinessUnitId, DATEPART(day, dteProductionDate) d,
-             SUM(numActualOutputQuantity) actual,
-             SUM(numGoodOutputQuantity) good,
-             SUM(numAvailableMinute) availableMin,
-             SUM(numNptLossTimeInMinutes) nptMin,
-             SUM(numCapacityPerHr * numAvailableMinute / 60.0) capUnits
-      FROM mes.tblOeeProdWasteHeaderArc
-      WHERE intBusinessUnitId IN (${inClause})
-        AND dteProductionDate >= '${meta.start}' AND dteProductionDate < '${meta.end}'
-      GROUP BY intBusinessUnitId, DATEPART(day, dteProductionDate)`)).recordset;
-
-    const bd = (await req.query(`
-      SELECT h.intBusinessUnitId, DATEPART(day, h.dteLossTimeDate) d,
-             r.strBreakdownName, r.strReasonName, r.strReason, r.strCategoryName, r.strSubCategoryName,
-             r.intLossTimeInMinutes downtime
-      FROM mes.tblNPTHeaderArc h
-      JOIN mes.tblNPTRowArc r ON r.intNPTId = h.intNPTId
-      WHERE h.intBusinessUnitId IN (${inClause})
-        AND h.dteLossTimeDate >= '${meta.start}' AND h.dteLossTimeDate < '${meta.end}'`)).recordset;
-
-    const ot = (await req.query(`
-      SELECT intBusinessUnitId, DATEPART(day, dteOverTimeDate) d, SUM(numOverTimeHour) hours
-      FROM saas.timeEmpOverTimeArc
-      WHERE intBusinessUnitId IN (${inClause}) AND isActive = 1
-        AND dteOverTimeDate >= '${meta.start}' AND dteOverTimeDate < '${meta.end}'
-      GROUP BY intBusinessUnitId, DATEPART(day, dteOverTimeDate)`)).recordset;
-
-    const man = (await req.query(`
-      SELECT e.intBusinessUnitId, DATEPART(day, a.dteAttendanceDate) d, COUNT(DISTINCT a.intEmployeeId) cnt
-      FROM saas.timeAttendanceDailySummaryArc a
-      JOIN saas.empEmployeeBasicInfoArc e ON e.intEmployeeBasicInfoId = a.intEmployeeId
-      WHERE e.intBusinessUnitId IN (${inClause}) AND a.isPresent = 1
-        AND a.dteAttendanceDate >= '${meta.start}' AND a.dteAttendanceDate < '${meta.end}'
-      GROUP BY e.intBusinessUnitId, DATEPART(day, a.dteAttendanceDate)`)).recordset;
-
-    const tr = (await req.query(`
-      SELECT e.intBusinessUnitId, DATEPART(day, t.dteStartDate) d, COUNT(*) cnt
-      FROM saas.empEmployeeTrainingArc t
-      JOIN saas.empEmployeeBasicInfoArc e ON e.intEmployeeBasicInfoId = t.intEmployeeBasicInfoId
-      WHERE e.intBusinessUnitId IN (${inClause})
-        AND t.dteStartDate >= '${meta.start}' AND t.dteStartDate < '${meta.end}'
-      GROUP BY e.intBusinessUnitId, DATEPART(day, t.dteStartDate)`)).recordset;
-
-    const pr = (await req.query(`
-      SELECT intBusinessUnitId, DATEPART(day, dteFromDate) d, COUNT(*) cnt
-      FROM pmt.tblProjectManagementArc
-      WHERE intBusinessUnitId IN (${inClause}) AND isActive = 1
-        AND dteFromDate >= '${meta.start}' AND dteFromDate < '${meta.end}'
-      GROUP BY intBusinessUnitId, DATEPART(day, dteFromDate)`)).recordset;
-
-    const tgt = (await req.query(`
-      SELECT t.intBusinessUnitId, k.strKPIs, t.numTarget
-      FROM pms.tblTargetSetupArc t
-      JOIN pms.tblKPIsArc k ON k.intKPIsId = t.intKPIsId
-      WHERE t.intBusinessUnitId IN (${inClause}) AND t.isActive = 1
-        AND t.strTargetFrequency = 'Monthly' AND t.strFrequencyValue = '${meta.freqValue}'`)).recordset;
-
-    return buildSnapshot(meta, { prod, bd, ot, man, tr, pr, tgt });
-  } finally {
-    await pool.close();
-  }
-}
-
-const app = express();
-app.use(express.json());
-app.use(express.static(path.join(__dirname, "public")));
-
-const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZwd2JjdXh3eGtxdmF1ZmZxb29qIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM4MjA4NjEsImV4cCI6MjA5OTM5Njg2MX0.iAoIZXl-2G7h3wm4jcYsEs6-wdN-YKTS-KbBteBBzUk";
-
-const SUPABASE_PROJECT_REF = "pacing-dashboard";
-
-async function supabaseFetch(pathAndQuery) {
-  const res = await fetch(`https://${SUPABASE_PROJECT_REF}.supabase.co/rest/v1${pathAndQuery}`, {
-    headers: { Authorization: `Bearer ${SUPABASE_ANON_KEY}`, "apikey": SUPABASE_ANON_KEY },
-  });
-  const data = await res.json().catch(() => null);
-  return { status: res.status, data };
-}
-
-async function supabaseMonthsData() {
-  const { data } = await supabaseFetch("/ACCL_KPI_TARGET?select=month,year");
-  if (!data || data.length === 0) throw new Error("Supabase months query failed");
-  const byMonth = {};
-  for (const r of data) {
-    const key = `${r.year}-${String(r.month).padStart(2, "0")}`;
-    if (!byMonth[key]) byMonth[key] = { year: r.year, month: r.month, monthName: MONTHS[r.month - 1] };
-  }
-  return Object.values(byMonth);
-}
-
 async function supabaseSnapshotData(meta) {
   const monthKey = `${meta.year}-${String(meta.month).padStart(2, "0")}`;
   const { data } = await supabaseFetch(`/ACCL_KPI_TARGET?month=eq.${monthKey}&sbu=not.is.null`);
   if (!data || data.length === 0) throw new Error("Supabase snapshot query failed for " + monthKey);
   return buildSnapshotFromSupabase(data, meta);
-}
-
-function buildSnapshotFromSupabase(rows, meta) {
-  const idx = Object.fromEntries(BUS.map((b, i) => [b.dwhBuId, i]));
-  const sbus = BUS.map(b => ({
-    display: b.display,
-    dwhSbu: b.dwhSbu,
-    dwhBuId: b.dwhBuId,
-    today: meta.today,
-    targets: {},
-    dayLog: {},
-    breakdownByDay: {},
-    breakdownByReason: {},
-    totalDowntime: 0,
-  }));
-
-  // KPI targets from Supabase ACCL_KPI_TARGET
-  const tgtBySbu = {};
-  for (const r of rows) {
-    const buId = Number(r.intBusinessUnitId);
-    const name = (r.strKPIs || "").toLowerCase();
-    const val = Number(r.numTarget);
-    if (!Number.isFinite(val)) continue;
-    const map = tgtBySbu[buId] || (tgtBySbu[buId] = {});
-    map[name] = val;
-  }
-  for (const buIdStr of Object.keys(tgtBySbu)) {
-    const i = idx[Number(buIdStr)];
-    if (i !== undefined) {
-      const map = tgtBySbu[buIdStr];
-      const t = {};
-      for (const rule of TARGET_RULES) {
-        if (rule.ordered) {
-          for (const p of rule.patterns) {
-            const matched = Object.keys(map).filter(n => n.includes(p));
-            if (matched.length) {
-              t[rule.id] = Math.min(...matched.map(n => map[n]));
-              break;
-            }
-          }
-        } else {
-          let best;
-          for (const n of Object.keys(map)) {
-            if (rule.patterns.some(p => n.includes(p)) && (best === undefined || map[n] < best)) {
-              best = map[n];
-            }
-          }
-          if (best !== undefined) t[rule.id] = best;
-        }
-      }
-      sbus[i].targets = t;
-    }
-  }
-
-  return {
-    meta: {
-      generated: new Date().toISOString().replace("T", " ").slice(0, 19),
-      year: meta.year,
-      month: meta.month,
-      monthName: meta.monthName,
-      totalDays: meta.totalDays,
-    },
-    sbus,
-  };
 }
 
 app.get("/api/months", async (req, res) => {
@@ -377,6 +217,8 @@ app.get("/api/dwh", async (req, res) => {
     res.status(502).json({ error: String(err && err.message ? err.message : err) });
   }
 });
+
+// ---- remaining MSSQL functions removed ----
 
 // ---- remote MCP server (Streamable HTTP, stateless JSON-RPC) ----
 const MCP_TOOLS = [
