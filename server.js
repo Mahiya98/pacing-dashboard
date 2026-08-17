@@ -8,7 +8,7 @@ try { process.loadEnvFile(path.join(__dirname, ".env")); } catch {}
 
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZwd2JjdXh3eGtxdmF1ZmZxb29qIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM4MjA4NjEsImV4cCI6MjA5OTM5Njg2MX0.iAoIZXl-2G7h3wm4jcYsEs6-wdN-YKTS-KbBteBBzUk";
 
-const SUPABASE_PROJECT_REF = "pacing-dashboard";
+const SUPABASE_PROJECT_REF = "pacing-dashboard"; // permanent supabase-only data source
 
 const BUS = [
   { display: "AEFML", dwhSbu: "AEL", dwhBuId: 144 },
