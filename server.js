@@ -377,6 +377,18 @@ const MCP_TOOLS = [
       required: ["sbu"],
     },
   },
+  {
+    name: "get_sbu_supabase",
+    description: "Return a single SBU's KPI targets and metadata from Supabase (independent of DWH tunnel).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        month: { type: "string", description: "Month as YYYY-MM (e.g. 2026-08). Omit for current month." },
+        sbu: { type: "string", description: "SBU code: AEFML, AAFL, FAL, MRML, ACCL, APFIL, AIL" },
+      },
+      required: ["month", "sbu"],
+    },
+  },
 ];
 
 async function callMcpTool(name, args) {
@@ -392,6 +404,34 @@ async function callMcpTool(name, args) {
     const sbu = (snap.sbus || []).find(s => String(s.display).toUpperCase() === want);
     if (!sbu) throw new Error("SBU not found: " + (args && args.sbu) + ". Available: " + (snap.sbus || []).map(s => s.display).join(", "));
     return sbu;
+  }
+  if (name === "get_sbu_supabase") {
+    const month = args && args.month ? args.month : resolveMonth({}).monthName;
+    const sbu = String(args && args.sbu || "").toUpperCase();
+    const { supabase_anon_key } = process.env;
+    const res = await fetch(`https://${process.env.SUPABASE_PROJECT_REF}.supabase.co/rest/v1/ACCL_KPI_TARGET?month=eq.${month}&sbu=eq.${sbu}`, {
+      headers: { Authorization: `Bearer ${supabase_anon_key}` },
+    });
+    if (!res.ok) throw new Error("Supabase query failed: " + res.status);
+    const rows = await res.json();
+    if (!rows || rows.length === 0) throw new Error("No Supabase data for month=" + month + " sbu=" + sbu);
+    const r = rows[0];
+    return {
+      sbu,
+      month,
+      targets: {
+        cap_util: Number(r.cap_util_target),
+        oee: Number(r.oee_target),
+        Yeild: Number(r.Yeild_target),
+        waste: Number(r.waste_target),
+        "5s_score": Number(r."5s_score_target"),
+        kaizen: Number(r.kaizen_target),
+        kaizen_savings: Number(r.kaizen_savings_target),
+        training: Number(r.training_target),
+        manpower: Number(r.manpower_target),
+        project: Number(r.project_target),
+      },
+    };
   }
   throw new Error("Unknown tool: " + name);
 }
