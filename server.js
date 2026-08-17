@@ -1,4 +1,5 @@
 import express from "express";
+import sql from "mssql";
 import path from "path";
 import os from "os";
 import { fileURLToPath } from "url";
@@ -6,9 +7,19 @@ import { fileURLToPath } from "url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 try { process.loadEnvFile(path.join(__dirname, ".env")); } catch {}
 
+const DB_CONFIG = {
+  server: process.env.DWH_SERVER || "203.202.241.211",
+  port: Number(process.env.DWH_PORT) || 1433,
+  user: process.env.DWH_USER || "mcp_user",
+  password: process.env.DWH_PASSWORD || "",
+  database: process.env.DWH_DATABASE || "DWH",
+  options: { encrypt: false, trustServerCertificate: false },
+  pool: { max: 10, min: 0, idleTimeoutMillis: 30000 },
+};
+
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZwd2JjdXh3eGtxdmF1ZmZxb29qIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM4MjA4NjEsImV4cCI6MjA5OTM5Njg2MX0.iAoIZXl-2G7h3wm4jcYsEs6-wdN-YKTS-KbBteBBzUk";
 
-const SUPABASE_PROJECT_REF = "pacing-dashboard"; // permanent supabase-only data source
+const SUPABASE_PROJECT_REF = "vpwbcuxwxkqvauffqooj";
 
 const BUS = [
   { display: "AEFML", dwhSbu: "AEL", dwhBuId: 144 },
@@ -191,34 +202,154 @@ function buildSnapshot(meta, rows) {
   };
 }
 
-async function supabaseSnapshotData(meta) {
-  const monthKey = `${meta.year}-${String(meta.month).padStart(2, "0")}`;
-  const { data } = await supabaseFetch(`/ACCL_KPI_TARGET?month=eq.${monthKey}&sbu=not.is.null`);
-  if (!data || data.length === 0) throw new Error("Supabase snapshot query failed for " + monthKey);
-  return buildSnapshotFromSupabase(data, meta);
+async function loadSnapshot(meta) {
+  const inClause = BUS.map(b => b.dwhBuId).join(",");
+  const pool = await sql.connect(DB_CONFIG);
+  try {
+    const req = pool.request();
+    const prod = (await req.query(`
+      SELECT intBusinessUnitId, DATEPART(day, dteProductionDate) d,
+             SUM(numActualOutputQuantity) actual,
+             SUM(numGoodOutputQuantity) good,
+             SUM(numAvailableMinute) availableMin,
+             SUM(numNptLossTimeInMinutes) nptMin,
+             SUM(numCapacityPerHr * numAvailableMinute / 60.0) capUnits
+      FROM mes.tblOeeProdWasteHeaderArc
+      WHERE intBusinessUnitId IN (${inClause})
+        AND dteProductionDate >= '${meta.start}' AND dteProductionDate < '${meta.end}'
+      GROUP BY intBusinessUnitId, DATEPART(day, dteProductionDate)`)).recordset;
+
+    const bd = (await req.query(`
+      SELECT h.intBusinessUnitId, DATEPART(day, h.dteLossTimeDate) d,
+             r.strBreakdownName, r.strReasonName, r.strReason, r.strCategoryName, r.strSubCategoryName,
+             r.intLossTimeInMinutes downtime
+      FROM mes.tblNPTHeaderArc h
+      JOIN mes.tblNPTRowArc r ON r.intNPTId = h.intNPTId
+      WHERE h.intBusinessUnitId IN (${inClause})
+        AND h.dteLossTimeDate >= '${meta.start}' AND h.dteLossTimeDate < '${meta.end}'`)).recordset;
+
+    const ot = (await req.query(`
+      SELECT intBusinessUnitId, DATEPART(day, dteOverTimeDate) d, SUM(numOverTimeHour) hours
+      FROM saas.timeEmpOverTimeArc
+      WHERE intBusinessUnitId IN (${inClause}) AND isActive = 1
+        AND dteOverTimeDate >= '${meta.start}' AND dteOverTimeDate < '${meta.end}'
+      GROUP BY intBusinessUnitId, DATEPART(day, dteOverTimeDate)`)).recordset;
+
+    const man = (await req.query(`
+      SELECT e.intBusinessUnitId, DATEPART(day, a.dteAttendanceDate) d, COUNT(DISTINCT a.intEmployeeId) cnt
+      FROM saas.timeAttendanceDailySummaryArc a
+      JOIN saas.empEmployeeBasicInfoArc e ON e.intEmployeeBasicInfoId = a.intEmployeeId
+      WHERE e.intBusinessUnitId IN (${inClause}) AND a.isPresent = 1
+        AND a.dteAttendanceDate >= '${meta.start}' AND a.dteAttendanceDate < '${meta.end}'
+      GROUP BY e.intBusinessUnitId, DATEPART(day, a.dteAttendanceDate)`)).recordset;
+
+    const tr = (await req.query(`
+      SELECT e.intBusinessUnitId, DATEPART(day, t.dteStartDate) d, COUNT(*) cnt
+      FROM saas.empEmployeeTrainingArc t
+      JOIN saas.empEmployeeBasicInfoArc e ON e.intEmployeeBasicInfoId = t.intEmployeeBasicInfoId
+      WHERE e.intBusinessUnitId IN (${inClause})
+        AND t.dteStartDate >= '${meta.start}' AND t.dteStartDate < '${meta.end}'
+      GROUP BY e.intBusinessUnitId, DATEPART(day, t.dteStartDate)`)).recordset;
+
+    const pr = (await req.query(`
+      SELECT intBusinessUnitId, DATEPART(day, dteFromDate) d, COUNT(*) cnt
+      FROM pmt.tblProjectManagementArc
+      WHERE intBusinessUnitId IN (${inClause}) AND isActive = 1
+        AND dteFromDate >= '${meta.start}' AND dteFromDate < '${meta.end}'
+      GROUP BY intBusinessUnitId, DATEPART(day, dteFromDate)`)).recordset;
+
+    const tgt = (await req.query(`
+      SELECT t.intBusinessUnitId, k.strKPIs, t.numTarget
+      FROM pms.tblTargetSetupArc t
+      JOIN pms.tblKPIsArc k ON k.intKPIsId = t.intKPIsId
+      WHERE t.intBusinessUnitId IN (${inClause}) AND t.isActive = 1
+        AND t.strTargetFrequency = 'Monthly' AND t.strFrequencyValue = '${meta.freqValue}'`)).recordset;
+
+    return buildSnapshot(meta, { prod, bd, ot, man, tr, pr, tgt });
+  } finally {
+    await pool.close();
+  }
+}
+
+const app = express();
+app.use(express.json());
+app.use(express.static(path.join(__dirname, "public")));
+
+const PROXY_URL = (process.env.DATA_PROXY_URL || "").trim().replace(/\/+$/, "");
+
+async function proxyJson(pathAndQuery) {
+  const r = await fetch(`${PROXY_URL}${pathAndQuery}`, {
+    signal: AbortSignal.timeout(60000),
+    headers: { "Cache-Control": "no-cache" },
+  });
+  const data = await r.json().catch(() => null);
+  return { status: r.status, data };
+}
+
+let cache = { key: null, value: null, at: 0 };
+const TTL_MS = 15000;
+
+let monthsCache = { value: null, at: 0 };
+const MONTHS_TTL_MS = 3600000;
+
+async function getMonthsData() {
+  if (PROXY_URL) {
+    const { status, data } = await proxyJson("/api/months");
+    if (status !== 200) throw new Error("proxy months failed (HTTP " + status + ")");
+    return data;
+  }
+  const now = Date.now();
+  if (monthsCache.value && now - monthsCache.at < MONTHS_TTL_MS) return monthsCache.value;
+  const pool = await sql.connect(DB_CONFIG);
+  try {
+    const rows = (await pool.request().query(`
+      SELECT DISTINCT YEAR(dteProductionDate) y, MONTH(dteProductionDate) m
+      FROM mes.tblOeeProdWasteHeaderArc
+      ORDER BY y DESC, m DESC`)).recordset;
+    const months = rows.map(r => ({ year: Number(r.y), month: Number(r.m) }));
+    monthsCache = { value: months, at: Date.now() };
+    return months;
+  } finally {
+    await pool.close();
+  }
+}
+
+async function getSnapshotData(meta) {
+  if (PROXY_URL) {
+    const qs = new URLSearchParams({ month: `${meta.year}-${String(meta.month).padStart(2, "0")}` }).toString();
+    const { status, data } = await proxyJson(`/api/dwh?${qs}`);
+    if (status !== 200) throw new Error("proxy snapshot failed (HTTP " + status + ")");
+    return data;
+  }
+  return loadSnapshot(meta);
 }
 
 app.get("/api/months", async (req, res) => {
   try {
     res.setHeader("Cache-Control", "no-store");
-    res.json(await supabaseMonthsData());
+    res.json(await getMonthsData());
   } catch (err) {
     res.status(502).json({ error: String(err && err.message ? err.message : err) });
   }
 });
 
 app.get("/api/dwh", async (req, res) => {
+  const meta = resolveMonth(req.query);
+  const force = req.query.refresh === "1";
+  const key = JSON.stringify(meta);
+  const now = Date.now();
+  if (!force && !PROXY_URL && cache.key === key && now - cache.at < TTL_MS) {
+    return res.json(cache.value);
+  }
   try {
-    const meta = resolveMonth(req.query);
-    const snapshot = await supabaseSnapshotData(meta);
+    const snapshot = await getSnapshotData(meta);
+    if (!PROXY_URL) cache = { key, value: snapshot, at: Date.now() };
     res.setHeader("Cache-Control", "no-store");
     res.json(snapshot);
   } catch (err) {
     res.status(502).json({ error: String(err && err.message ? err.message : err) });
   }
 });
-
-// ---- remaining MSSQL functions removed ----
 
 // ---- remote MCP server (Streamable HTTP, stateless JSON-RPC) ----
 const MCP_TOOLS = [
@@ -279,32 +410,24 @@ async function callMcpTool(name, args) {
     return sbu;
   }
   if (name === "get_sbu_supabase") {
-    const month = args && args.month ? args.month : resolveMonth({}).monthName;
+    const monthName = args && args.month
+      ? MONTHS[Number(args.month.slice(5, 7)) - 1]
+      : resolveMonth({}).monthName;
     const sbu = String(args && args.sbu || "").toUpperCase();
-    const { supabase_anon_key } = process.env;
-    const res = await fetch(`https://${process.env.SUPABASE_PROJECT_REF}.supabase.co/rest/v1/ACCL_KPI_TARGET?month=eq.${month}&sbu=eq.${sbu}`, {
-      headers: { Authorization: `Bearer ${supabase_anon_key}` },
+    const supabaseKey = process.env.SUPABASE_ANON_KEY || SUPABASE_ANON_KEY;
+    const res = await fetch(`https://${SUPABASE_PROJECT_REF}.supabase.co/rest/v1/ACCL_KPI_TARGET?select=kpi_id,monthly_target&sbu=eq.${sbu}&month=eq.${encodeURIComponent(monthName)}`, {
+      headers: { Authorization: `Bearer ${supabaseKey}`, "apikey": supabaseKey },
     });
     if (!res.ok) throw new Error("Supabase query failed: " + res.status);
     const rows = await res.json();
-    if (!rows || rows.length === 0) throw new Error("No Supabase data for month=" + month + " sbu=" + sbu);
-    const r = rows[0];
-    return {
-      sbu,
-      month,
-      targets: {
-        cap_util: Number(r.cap_util_target),
-        oee: Number(r.oee_target),
-        Yeild: Number(r.Yeild_target),
-        waste: Number(r.waste_target),
-        "5s_score": Number(r["5s_score_target"]),
-        kaizen: Number(r.kaizen_target),
-        kaizen_savings: Number(r.kaizen_savings_target),
-        training: Number(r.training_target),
-        manpower: Number(r.manpower_target),
-        project: Number(r.project_target),
-      },
-    };
+    if (!rows || rows.length === 0) throw new Error("No Supabase data for month=" + monthName + " sbu=" + sbu);
+    const targets = {};
+    for (const r of rows) {
+      const raw = (r.monthly_target === null || r.monthly_target === undefined) ? null : String(r.monthly_target).replace(/,/g, "").trim();
+      const val = (raw === null || raw === "") ? null : Number(raw);
+      targets[r.kpi_id] = (val === null || isNaN(val)) ? null : val;
+    }
+    return { sbu, month: monthName, targets };
   }
   throw new Error("Unknown tool: " + name);
 }
