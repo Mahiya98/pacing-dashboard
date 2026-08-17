@@ -268,6 +268,7 @@ async function loadSnapshot(meta) {
 }
 
 const app = express();
+app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
 const PROXY_URL = (process.env.DATA_PROXY_URL || "").trim().replace(/\/+$/, "");
@@ -284,68 +285,190 @@ async function proxyJson(pathAndQuery) {
 let cache = { key: null, value: null, at: 0 };
 const TTL_MS = 15000;
 
-app.get("/api/dwh", async (req, res) => {
+let monthsCache = { value: null, at: 0 };
+const MONTHS_TTL_MS = 3600000;
+
+async function getMonthsData() {
   if (PROXY_URL) {
-    try {
-      const qs = new URLSearchParams(req.query).toString();
-      const { status, data } = await proxyJson(`/api/dwh${qs ? "?" + qs : ""}`);
-      res.setHeader("Cache-Control", "no-store");
-      return res.status(status).json(data);
-    } catch (err) {
-      return res.status(502).json({ error: "Data proxy unavailable: " + String(err && err.message ? err.message : err) });
-    }
+    const { status, data } = await proxyJson("/api/months");
+    if (status !== 200) throw new Error("proxy months failed (HTTP " + status + ")");
+    return data;
   }
+  const now = Date.now();
+  if (monthsCache.value && now - monthsCache.at < MONTHS_TTL_MS) return monthsCache.value;
+  const pool = await sql.connect(DB_CONFIG);
+  try {
+    const rows = (await pool.request().query(`
+      SELECT DISTINCT YEAR(dteProductionDate) y, MONTH(dteProductionDate) m
+      FROM mes.tblOeeProdWasteHeaderArc
+      ORDER BY y DESC, m DESC`)).recordset;
+    const months = rows.map(r => ({ year: Number(r.y), month: Number(r.m) }));
+    monthsCache = { value: months, at: Date.now() };
+    return months;
+  } finally {
+    await pool.close();
+  }
+}
+
+async function getSnapshotData(meta) {
+  if (PROXY_URL) {
+    const qs = new URLSearchParams({ month: `${meta.year}-${String(meta.month).padStart(2, "0")}` }).toString();
+    const { status, data } = await proxyJson(`/api/dwh?${qs}`);
+    if (status !== 200) throw new Error("proxy snapshot failed (HTTP " + status + ")");
+    return data;
+  }
+  return loadSnapshot(meta);
+}
+
+app.get("/api/months", async (req, res) => {
+  try {
+    res.setHeader("Cache-Control", "no-store");
+    res.json(await getMonthsData());
+  } catch (err) {
+    res.status(502).json({ error: String(err && err.message ? err.message : err) });
+  }
+});
+
+app.get("/api/dwh", async (req, res) => {
   const meta = resolveMonth(req.query);
   const force = req.query.refresh === "1";
   const key = JSON.stringify(meta);
   const now = Date.now();
-  if (!force && cache.key === key && now - cache.at < TTL_MS) {
+  if (!force && !PROXY_URL && cache.key === key && now - cache.at < TTL_MS) {
     return res.json(cache.value);
   }
   try {
-    const snapshot = await loadSnapshot(meta);
-    cache = { key, value: snapshot, at: Date.now() };
+    const snapshot = await getSnapshotData(meta);
+    if (!PROXY_URL) cache = { key, value: snapshot, at: Date.now() };
     res.setHeader("Cache-Control", "no-store");
     res.json(snapshot);
   } catch (err) {
-    res.status(500).json({ error: String(err && err.message ? err.message : err) });
+    res.status(502).json({ error: String(err && err.message ? err.message : err) });
   }
 });
 
-let monthsCache = { value: null, at: 0 };
-const MONTHS_TTL_MS = 3600000;
+// ---- remote MCP server (Streamable HTTP, stateless JSON-RPC) ----
+const MCP_TOOLS = [
+  {
+    name: "list_months",
+    description: "List every month that has production data in the DWH (newest first).",
+    inputSchema: { type: "object", properties: {}, required: [] },
+  },
+  {
+    name: "get_snapshot",
+    description: "Return the full pacing dashboard snapshot for a month (targets + day-by-day KPIs for every SBU).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        month: { type: "string", description: "Month as YYYY-MM (e.g. 2026-08). Omit for the current month." },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "get_sbu",
+    description: "Return a single SBU's targets and day-by-day log for a month.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        month: { type: "string", description: "Month as YYYY-MM (e.g. 2026-08). Omit for the current month." },
+        sbu: { type: "string", description: "SBU code: AEFML, AAFL, FAL, MRML, ACCL, APFIL, AIL" },
+      },
+      required: ["sbu"],
+    },
+  },
+];
 
-app.get("/api/months", async (req, res) => {
-  if (PROXY_URL) {
-    try {
-      const { status, data } = await proxyJson("/api/months");
-      res.setHeader("Cache-Control", "no-store");
-      return res.status(status).json(data);
-    } catch (err) {
-      return res.status(502).json({ error: "Data proxy unavailable: " + String(err && err.message ? err.message : err) });
+async function callMcpTool(name, args) {
+  if (name === "list_months") return await getMonthsData();
+  if (name === "get_snapshot") {
+    const meta = resolveMonth({ month: args && args.month });
+    return await getSnapshotData(meta);
+  }
+  if (name === "get_sbu") {
+    const meta = resolveMonth({ month: args && args.month });
+    const snap = await getSnapshotData(meta);
+    const want = String(args && args.sbu || "").toUpperCase();
+    const sbu = (snap.sbus || []).find(s => String(s.display).toUpperCase() === want);
+    if (!sbu) throw new Error("SBU not found: " + (args && args.sbu) + ". Available: " + (snap.sbus || []).map(s => s.display).join(", "));
+    return sbu;
+  }
+  throw new Error("Unknown tool: " + name);
+}
+
+function mcpError(id, code, message) {
+  return { jsonrpc: "2.0", id: id ?? null, error: { code, message } };
+}
+
+async function handleMcpMessage(msg) {
+  const id = msg && msg.id;
+  const method = msg && msg.method;
+  if (!method) return mcpError(id, -32600, "Invalid Request");
+  if (method.startsWith("notifications/")) return null;
+
+  switch (method) {
+    case "initialize": {
+      const protocolVersion = (msg.params && msg.params.protocolVersion) || "2025-06-18";
+      return {
+        jsonrpc: "2.0",
+        id,
+        result: {
+          protocolVersion,
+          capabilities: { tools: {} },
+          serverInfo: { name: "pacing-dashboard-mcp", version: "1.0.0" },
+        },
+      };
     }
+    case "ping":
+      return { jsonrpc: "2.0", id, result: {} };
+    case "tools/list":
+      return { jsonrpc: "2.0", id, result: { tools: MCP_TOOLS } };
+    case "tools/call": {
+      const name = msg.params && msg.params.name;
+      const args = (msg.params && msg.params.arguments) || {};
+      try {
+        const data = await callMcpTool(name, args);
+        return { jsonrpc: "2.0", id, result: { content: [{ type: "text", text: JSON.stringify(data) }], isError: false } };
+      } catch (e) {
+        return { jsonrpc: "2.0", id, result: { content: [{ type: "text", text: String(e && e.message ? e.message : e) }], isError: true } };
+      }
+    }
+    default:
+      return mcpError(id, -32601, "Method not found: " + method);
   }
-  const now = Date.now();
-  if (monthsCache.value && now - monthsCache.at < MONTHS_TTL_MS) {
-    return res.json(monthsCache.value);
-  }
+}
+
+function mcpCors(res) {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Mcp-Session-Id, Authorization");
+  res.setHeader("Access-Control-Allow-Methods", "POST, GET, OPTIONS");
+}
+
+app.options("/mcp", (req, res) => { mcpCors(res); return res.status(204).end(); });
+
+app.post("/mcp", async (req, res) => {
+  mcpCors(res);
+  res.setHeader("Content-Type", "application/json");
   try {
-    const pool = await sql.connect(DB_CONFIG);
-    try {
-      const rows = (await pool.request().query(`
-        SELECT DISTINCT YEAR(dteProductionDate) y, MONTH(dteProductionDate) m
-        FROM mes.tblOeeProdWasteHeaderArc
-        ORDER BY y DESC, m DESC`)).recordset;
-      const months = rows.map(r => ({ year: Number(r.y), month: Number(r.m) }));
-      monthsCache = { value: months, at: Date.now() };
-      res.setHeader("Cache-Control", "no-store");
-      res.json(months);
-    } finally {
-      await pool.close();
+    if (Array.isArray(req.body)) {
+      const results = [];
+      for (const m of req.body) {
+        const r = await handleMcpMessage(m);
+        if (r) results.push(r);
+      }
+      return res.json(results.length === 1 ? results[0] : results);
     }
+    const r = await handleMcpMessage(req.body);
+    if (r === null) return res.status(202).end();
+    return res.json(r);
   } catch (err) {
-    res.status(500).json({ error: String(err && err.message ? err.message : err) });
+    return res.status(500).json(mcpError(null, -32603, String(err && err.message ? err.message : err)));
   }
+});
+
+app.get("/mcp", (req, res) => {
+  mcpCors(res);
+  res.status(405).json(mcpError(null, -32600, "This MCP endpoint is Streamable HTTP (POST only)."));
 });
 
 const PORT = process.env.PORT || 3000;
