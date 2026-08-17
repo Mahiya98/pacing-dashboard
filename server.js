@@ -29,6 +29,9 @@ const BUS = [
   { display: "ACCL", dwhSbu: "ACCL", dwhBuId: 4 },
   { display: "APFIL", dwhSbu: "APFIL", dwhBuId: 8 },
   { display: "AIL", dwhSbu: "AIL", dwhBuId: 224 },
+  { display: "ALEL", dwhSbu: "ALEL", dwhBuId: 237 },
+  { display: "ARMCL", dwhSbu: "ARMCL", dwhBuId: 175 },
+  { display: "ABSL", dwhSbu: "ABSL", dwhBuId: 220 },
 ];
 
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -376,7 +379,7 @@ const MCP_TOOLS = [
       type: "object",
       properties: {
         month: { type: "string", description: "Month as YYYY-MM (e.g. 2026-08). Omit for the current month." },
-        sbu: { type: "string", description: "SBU code: AEFML, AAFL, FAL, MRML, ACCL, APFIL, AIL" },
+        sbu: { type: "string", description: "SBU code: AEFML, AAFL, FAL, MRML, ACCL, APFIL, AIL, ALEL, ARMCL, ABSL" },
       },
       required: ["sbu"],
     },
@@ -388,7 +391,7 @@ const MCP_TOOLS = [
       type: "object",
       properties: {
         month: { type: "string", description: "Month as YYYY-MM (e.g. 2026-08). Omit for current month." },
-        sbu: { type: "string", description: "SBU code: AEFML, AAFL, FAL, MRML, ACCL, APFIL, AIL" },
+        sbu: { type: "string", description: "SBU code: AEFML, AAFL, FAL, MRML, ACCL, APFIL, AIL, ALEL, ARMCL, ABSL" },
       },
       required: ["month", "sbu"],
     },
